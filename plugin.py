@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Updated for 10s Timer
+PLUGIN_VERSION = "1.1" # Updated for 30s Timer + Font Tweak
 
 # DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -57,16 +57,19 @@ def saveConfig(config):
 
 # --- SCREEN 1: MAIN WINDOW (CENTER) ---
 class FootballScoresScreen(Screen):
+    # UPDATED SKIN: FONTS REDUCED BY 15% FROM PREVIOUS VERSION
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
-            <widget name="scores" position="10,10" size="680,350" font="Regular;30" />
-            <widget name="league_info" position="10,365" size="680,40" font="Regular;27" halign="center" foregroundColor="#ff0000" />
-            <widget name="status" position="10,410" size="680,50" font="Regular;24" halign="center" />
+            <widget name="scores" position="10,10" size="680,350" font="Regular;26" />
             
-            <widget name="credit" position="10,475" size="200,40" font="Regular;24" halign="left" foregroundColor="#ffcc00" />
-            <widget name="key_green" position="220,475" size="150,40" font="Regular;24" halign="center" foregroundColor="#00ff00" />
-            <widget name="key_yellow" position="380,475" size="150,40" font="Regular;24" halign="center" foregroundColor="#ffff00" />
-            <widget name="key_blue" position="540,475" size="150,40" font="Regular;24" halign="right" foregroundColor="#00aaff" />
+            <widget name="league_info" position="10,365" size="680,40" font="Regular;23" halign="center" foregroundColor="#ff0000" />
+            
+            <widget name="status" position="10,410" size="680,50" font="Regular;20" halign="center" />
+            
+            <widget name="credit" position="10,475" size="200,40" font="Regular;20" halign="left" foregroundColor="#ffcc00" />
+            <widget name="key_green" position="220,475" size="150,40" font="Regular;20" halign="center" foregroundColor="#00ff00" />
+            <widget name="key_yellow" position="380,475" size="150,40" font="Regular;20" halign="center" foregroundColor="#ffff00" />
+            <widget name="key_blue" position="540,475" size="150,40" font="Regular;20" halign="right" foregroundColor="#00aaff" />
         </screen>
     """
     
@@ -119,8 +122,8 @@ class FootballScoresScreen(Screen):
         else:
             if self.last_data:
                 self.displayScores(self.last_data)
-                # Initial start
-                self.timer.start(10000, True)
+                # CHANGED: Start with 30s interval
+                self.timer.start(30000, True)
             else:
                 self.fetchScores()
 
@@ -341,9 +344,7 @@ class FootballScoresScreen(Screen):
             
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
-            # CHANGED: REMOVED USER-AGENT AS REQUESTED
             
-            # CHANGED: 30s timeout preserved
             response = urlopen(req, timeout=30)
             data_string = response.read()
             
@@ -354,8 +355,8 @@ class FootballScoresScreen(Screen):
             self.last_data = data 
             self.displayScores(data)
             
-            # CHANGED: UPDATE EVERY 10 SECONDS (10000ms)
-            self.timer.start(10000, True)
+            # CHANGED: 30000 ms (30 Seconds)
+            self.timer.start(30000, True)
             
         except Exception as e:
             err_msg = str(e)
@@ -365,13 +366,13 @@ class FootballScoresScreen(Screen):
             elif "429" in err_msg:
                  self["status"].setText("Error: Too Many Requests")
                  self["scores"].setText("API Limit Reached (Free Tier).\nWait a moment...")
-                 # Still retry slowly on error to avoid spamming a blocked API
+                 # Retry in 2 minutes
                  self.timer.start(120000, True)
             else:
                 self["status"].setText("Error: " + err_msg[:40])
-                self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 10s...")
-                # Fast retry on connection error too
-                self.timer.start(10000, True)
+                self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 30s...")
+                # Retry in 30 seconds
+                self.timer.start(30000, True)
 
     def displayScores(self, data):
         try:
@@ -402,9 +403,11 @@ class FootballScoresScreen(Screen):
                 line = self.formatMatchLine(match, is_bar_mode=False)
                 output += line + "\n"
                 count += 1
-                
+            
+            # CHANGED: ADDED TIMESTAMP TO STATUS
+            current_time = time.strftime("%H:%M:%S")
             self["scores"].setText(output)
-            self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Upd: Now")
+            self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Last Upd: " + current_time)
             
         except Exception as e:
             self["scores"].setText("Display Error: " + str(e))
@@ -480,8 +483,10 @@ class FootballScoresBar(FootballScoresScreen):
                 row_string = "   |   ".join(chunk)
                 output += row_string + "\n"
 
+            # CHANGED: ADDED TIMESTAMP TO STATUS
+            current_time = time.strftime("%H:%M:%S")
             self["scores"].setText(output)
-            self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Upd: Now")
+            self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Last Upd: " + current_time)
             
         except Exception as e:
             self["scores"].setText("Display Error: " + str(e))
