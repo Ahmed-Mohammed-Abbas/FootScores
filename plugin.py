@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.2" # Bumped version for new feature
+PLUGIN_VERSION = "1.1" # Updated Version
 
 # DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -32,7 +32,7 @@ CODE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/ma
 def loadConfig():
     default = {
         "filter_league": "PL", 
-        "league_name": "Premier League (England)",
+        "league_name": "Premier League",
         "api_key": ""
     }
     try:
@@ -42,7 +42,7 @@ def loadConfig():
                 default.update(saved)
             if default.get("filter_league") == "ALL":
                 default["filter_league"] = "PL"
-                default["league_name"] = "Premier League (England)"
+                default["league_name"] = "Premier League"
     except:
         pass
     return default
@@ -78,7 +78,7 @@ class FootballScoresScreen(Screen):
         # State variables
         self.last_data = shared_data 
         self.live_only = live_only_mode
-        self.score_history = {} # NEW: Dictionary to store { match_id: "1-0" }
+        self.score_history = {} 
         
         self["scores"] = ScrollLabel("")
         self["league_info"] = Label("")
@@ -123,7 +123,6 @@ class FootballScoresScreen(Screen):
             else:
                 self.fetchScores()
 
-    # --- NEW HELPER FUNCTION TO FORMAT LINES & CHECK GOALS ---
     def formatMatchLine(self, match, is_bar_mode=False):
         home = match.get("homeTeam", {}).get("name", "Unknown")
         away = match.get("awayTeam", {}).get("name", "Unknown")
@@ -133,34 +132,26 @@ class FootballScoresScreen(Screen):
         a_sc = str(score.get("away")) if score.get("away") is not None else "0"
         match_id = match.get("id", 0)
         
-        # Determine Current Score String for comparison
         current_score_str = "%s-%s" % (h_sc, a_sc)
         
-        # Check History for GOAL
         is_goal = False
         if match_id in self.score_history:
             if self.score_history[match_id] != current_score_str:
                 is_goal = True
         
-        # Update History
         self.score_history[match_id] = current_score_str
         
-        # Truncate names for Bar Mode to fit 3 in a row
         if is_bar_mode:
             home = home[:10]
             away = away[:10]
 
-        # Build Line
         if status == "FINISHED":
             line = "%s %s-%s %s (FT)" % (home, h_sc, a_sc, away)
         elif status in ["IN_PLAY", "PAUSED"]:
             minute = str(match.get("minute", ""))
             line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
-            
-            # Add GOAL Indicator if detected
             if is_goal:
                 line = ">>> GOAL <<< " + line
-                
         else:
             utc_date_str = match.get("utcDate", "")
             try:
@@ -273,17 +264,18 @@ class FootballScoresScreen(Screen):
         self["scores"].pageDown()
     
     def selectLeague(self):
+        # UPDATED LIST: FREE TIER ONLY
         leagues = [
-            ("Premier League (England)", "PL"),
-            ("La Liga (Spain)", "PD"),
-            ("Serie A (Italy)", "SA"),
-            ("Bundesliga (Germany)", "BL1"),
-            ("Ligue 1 (France)", "FL1"),
-            ("Eredivisie (Netherlands)", "DED"),
-            ("Primeira Liga (Portugal)", "PPL"),
-            ("Championship (England)", "ELC"),
-            ("UEFA Champions League", "CL"),
-            ("UEFA Europa League", "EL"),
+            ("Premier League", "PL"),
+            ("Champions League", "CL"),
+            ("Primera Division", "PD"),
+            ("Serie A", "SA"),
+            ("Bundesliga", "BL1"),
+            ("Ligue 1", "FL1"),
+            ("Eredivisie", "DED"),
+            ("Campeonato Brasileiro", "BSA"),
+            ("Championship", "ELC"),
+            ("Primeira Liga", "PPL"),
             ("FIFA World Cup", "WC"),
             ("European Championship", "EC"),
         ]
@@ -382,7 +374,6 @@ class FootballScoresScreen(Screen):
             count = 0
             
             for match in display_matches:
-                # USE NEW HELPER FUNCTION
                 line = self.formatMatchLine(match, is_bar_mode=False)
                 output += line + "\n"
                 count += 1
@@ -454,7 +445,6 @@ class FootballScoresBar(FootballScoresScreen):
             count = 0
             
             for match in display_matches:
-                # USE NEW HELPER FUNCTION (Grid Mode = True)
                 line = self.formatMatchLine(match, is_bar_mode=True)
                 match_strings.append(line)
                 count += 1
