@@ -16,3 +16,14 @@ Download plugin.py from the repo.
 
 Installation is just extracting to the path:
 usr/lib/enigma2/python/Plugins/Extensions/
+
+
+
+New Version (1.1)
+Enhancements include:
+
+- Automatically request an update to the plugin when a new version is available.
+- Increased the font size.
+- The mini bar mode shows 3 Matches in each row.
+- Legues updated to only the free tier of Football.org.
+- Goal and Goal Disallow notifications.
