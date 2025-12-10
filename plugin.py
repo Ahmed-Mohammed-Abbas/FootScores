@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Optimized Speed + New Button Layout
+PLUGIN_VERSION = "1.1" # Rollback to 2.4 + Specific Green/Blue Logic
 
 # DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -59,7 +59,7 @@ def saveConfig(config):
     except:
         return False
 
-# --- GOAL NOTIFICATION POPUP (BOTTOM SCREEN) ---
+# --- GOAL NOTIFICATION POPUP (INTERACTIVE) ---
 class GoalPopup(Screen):
     # Positioned at Bottom (950)
     skin = """
@@ -67,16 +67,28 @@ class GoalPopup(Screen):
             <widget name="goal_text" position="10,10" size="1180,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
         </screen>
     """
-    def __init__(self, session, message):
+    def __init__(self, session, message, main_instance):
         Screen.__init__(self, session)
+        self.main = main_instance
         self["goal_text"] = Label(message)
         
-        # Auto close after 10 seconds
+        # OK or BLUE restores the Main Window
+        self["actions"] = ActionMap(["OkCancelActions", "ColorActions"], 
+        {
+            "ok": self.restoreMain,
+            "blue": self.restoreMain,
+            "cancel": self.close
+        }, -1)
+        
         self.timer = eTimer()
         self.timer.callback.append(self.close)
         self.timer.start(10000, True)
 
-# --- SCREEN 2: MINI BAR (Defined first) ---
+    def restoreMain(self):
+        self.close()
+        self.main.showFromBackground()
+
+# --- SCREEN 2: MINI BAR ---
 class FootballScoresBar(Screen):
     skin = """
         <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
@@ -93,7 +105,7 @@ class FootballScoresBar(Screen):
 
     def __init__(self, session, main_instance):
         Screen.__init__(self, session)
-        self.main = main_instance # Reference to Main Screen
+        self.main = main_instance 
         
         self["scores"] = ScrollLabel("")
         self["status"] = Label("")
@@ -106,18 +118,16 @@ class FootballScoresBar(Screen):
 
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
-            "ok": self.closeBar,     # OK -> Return to Main
-            "cancel": self.closeBar, # EXIT -> Return to Main
+            "ok": self.closeBar,         # OK -> Return to Main
+            "cancel": self.closeBar,     # EXIT -> Return to Main
             "up": self.pageUp,
             "down": self.pageDown,
-            "green": self.closeBar,  # Green (Toggle) -> Return to Main
-            "blue": self.goToBackground, # Blue -> Background
+            "green": self.closeBar,      # GREEN -> Return to Main (Toggle)
+            "blue": self.goToBackground, # BLUE -> Background
             "yellow": self.main.toggleLiveMode,
         }, -1)
         
         self.updateDisplay()
-        
-        # Check for updates from main every 2s (Fast UI update)
         self.timer = eTimer()
         self.timer.callback.append(self.updateDisplay)
         self.timer.start(2000, True) 
@@ -136,14 +146,13 @@ class FootballScoresBar(Screen):
         self["scores"].pageDown()
 
     def updateDisplay(self):
-        # Pull data from Main Instance
-        data = self.main.last_data
-        if not data:
+        if not hasattr(self.main, 'last_data') or not self.main.last_data:
             self["scores"].setText("Loading...")
             self.timer.start(1000, True)
             return
 
         try:
+            data = self.main.last_data
             matches = data.get("matches", [])
             display_matches = []
             
@@ -203,7 +212,7 @@ class FootballScoresScreen(Screen):
         self.score_history = {} 
         self.is_hidden = False 
         
-        # Global instance tracking
+        # Global instance
         global footscores_instance
         footscores_instance = self
         
@@ -212,7 +221,6 @@ class FootballScoresScreen(Screen):
         self["status"] = Label("Initializing...")
         self["credit"] = Label("Ver: " + PLUGIN_VERSION + " | By Reali22")
         
-        # LABELS MATCHING YOUR REQUEST
         self["key_green"] = Label("Mini Bar")
         self["key_yellow"] = Label("Live Only")
         self["key_blue"] = Label("Background")
@@ -220,13 +228,13 @@ class FootballScoresScreen(Screen):
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"],
         {
             "ok": self.hideToBackground, # OK -> Background
-            "cancel": self.hideToBackground, # EXIT -> Background
-            "menu": self.openMenu, # MENU -> API Key/Quit
+            "cancel": self.quitPlugin,   # EXIT -> Close Completely
+            "menu": self.openMenu,       # MENU -> API/Quit
             "up": self.pageUp,
             "down": self.pageDown,
-            "red": self.selectLeague, # RED -> Filter
-            "green": self.openBar,    # GREEN -> Mini Bar
-            "yellow": self.toggleLiveMode, # YELLOW -> Live Filter
+            "red": self.selectLeague,
+            "green": self.openBar,       # GREEN -> Open Mini Bar
+            "yellow": self.toggleLiveMode,
             "blue": self.hideToBackground, # BLUE -> Background
         }, -1)
         
@@ -249,14 +257,14 @@ class FootballScoresScreen(Screen):
         else:
             if self.last_data:
                 self.displayScores(self.last_data)
-                self.timer.start(15000, True) # 15s Fast Refresh
+                self.timer.start(15000, True) 
             else:
                 self.fetchScores()
 
     def hideToBackground(self):
         self.is_hidden = True
         self.hide()
-        self.session.open(MessageBox, "FootScores running in background.\nPress MENU to quit completely.", MessageBox.TYPE_INFO, timeout=3)
+        self.session.open(MessageBox, "FootScores in Background.\nNotifications Active.", MessageBox.TYPE_INFO, timeout=2)
 
     def showFromBackground(self):
         self.is_hidden = False
@@ -265,8 +273,10 @@ class FootballScoresScreen(Screen):
             self.displayScores(self.last_data)
 
     def openBar(self):
-        # Open Bar on top of Main
-        self.session.open(FootballScoresBar, self)
+        try:
+            self.session.open(FootballScoresBar, self)
+        except:
+            pass
 
     def openMenu(self):
         options = [
@@ -321,7 +331,7 @@ class FootballScoresScreen(Screen):
                     return 
             
             msg = "GOAL! %s %d-%d %s" % (home, h_int, a_int, away)
-            self.session.open(GoalPopup, msg)
+            self.session.open(GoalPopup, msg, self)
 
     def formatMatchLine(self, match, is_bar_mode=False):
         self.checkGoals(match)
@@ -360,7 +370,6 @@ class FootballScoresScreen(Screen):
         try:
             no_cache_url = UPDATE_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_url)
-            # Timeout 10s for fast check
             response = urlopen(req, timeout=10)
             remote_version = response.read().decode('utf-8').strip()
             
@@ -383,7 +392,6 @@ class FootballScoresScreen(Screen):
             self["status"].setText("Updating... Please wait.")
             no_cache_code = CODE_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_code)
-            # Timeout 20s for download
             response = urlopen(req, timeout=20)
             new_code = response.read()
             
@@ -443,6 +451,7 @@ class FootballScoresScreen(Screen):
         self.displayApiKeyPrompt()
     
     def switchToBar(self):
+        # Open Bar and close this Main screen
         self.session.open(FootballScoresBar, self.last_data, self.live_only, self.score_history)
         self.close() 
 
@@ -514,7 +523,6 @@ class FootballScoresScreen(Screen):
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
             
-            # Timeout 10s for speed
             response = urlopen(req, timeout=10)
             data_string = response.read()
             
@@ -525,7 +533,6 @@ class FootballScoresScreen(Screen):
             self.last_data = data 
             self.displayScores(data)
             
-            # FAST REFRESH: 15 Seconds
             self.timer.start(15000, True)
             
         except Exception as e:
