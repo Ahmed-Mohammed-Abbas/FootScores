@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # New Version with enhancement.
+PLUGIN_VERSION = "1.0" # Updated for 10s Timer
 
 # DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -57,13 +57,10 @@ def saveConfig(config):
 
 # --- SCREEN 1: MAIN WINDOW (CENTER) ---
 class FootballScoresScreen(Screen):
-    # UPDATED SKIN: FONTS INCREASED BY ~50%
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
             <widget name="scores" position="10,10" size="680,350" font="Regular;30" />
-            
             <widget name="league_info" position="10,365" size="680,40" font="Regular;27" halign="center" foregroundColor="#ff0000" />
-            
             <widget name="status" position="10,410" size="680,50" font="Regular;24" halign="center" />
             
             <widget name="credit" position="10,475" size="200,40" font="Regular;24" halign="left" foregroundColor="#ffcc00" />
@@ -122,11 +119,11 @@ class FootballScoresScreen(Screen):
         else:
             if self.last_data:
                 self.displayScores(self.last_data)
-                self.timer.start(60000, True)
+                # Initial start
+                self.timer.start(10000, True)
             else:
                 self.fetchScores()
 
-    # --- GOAL LOGIC ---
     def formatMatchLine(self, match, is_bar_mode=False):
         home = match.get("homeTeam", {}).get("name", "Unknown")
         away = match.get("awayTeam", {}).get("name", "Unknown")
@@ -344,8 +341,9 @@ class FootballScoresScreen(Screen):
             
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
-            req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+            # CHANGED: REMOVED USER-AGENT AS REQUESTED
             
+            # CHANGED: 30s timeout preserved
             response = urlopen(req, timeout=30)
             data_string = response.read()
             
@@ -355,7 +353,9 @@ class FootballScoresScreen(Screen):
             data = json.loads(data_string)
             self.last_data = data 
             self.displayScores(data)
-            self.timer.start(60000, True)
+            
+            # CHANGED: UPDATE EVERY 10 SECONDS (10000ms)
+            self.timer.start(10000, True)
             
         except Exception as e:
             err_msg = str(e)
@@ -365,11 +365,13 @@ class FootballScoresScreen(Screen):
             elif "429" in err_msg:
                  self["status"].setText("Error: Too Many Requests")
                  self["scores"].setText("API Limit Reached (Free Tier).\nWait a moment...")
+                 # Still retry slowly on error to avoid spamming a blocked API
                  self.timer.start(120000, True)
             else:
                 self["status"].setText("Error: " + err_msg[:40])
-                self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 60s...")
-                self.timer.start(60000, True)
+                self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 10s...")
+                # Fast retry on connection error too
+                self.timer.start(10000, True)
 
     def displayScores(self, data):
         try:
@@ -491,7 +493,7 @@ def Plugins(**kwargs):
     return [
         PluginDescriptor(
             name="Football Scores",
-            description="Live FB scores with Mini-Bar mode",
+            description="Live scores with Mini-Bar mode",
             where=PluginDescriptor.WHERE_PLUGINMENU,
             icon="plugin.png",
             fnc=main
