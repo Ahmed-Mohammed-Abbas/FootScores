@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.2" # OK Button Logic Fixed
+PLUGIN_VERSION = "2.6" # Debugged & Optimized
 
 # DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -59,34 +59,26 @@ def saveConfig(config):
     except:
         return False
 
-# --- GOAL NOTIFICATION POPUP (INTERACTIVE) ---
+# --- GOAL NOTIFICATION POPUP (Simplified) ---
 class GoalPopup(Screen):
     skin = """
         <screen position="center,950" size="1200,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
             <widget name="goal_text" position="10,10" size="1180,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
         </screen>
     """
-    def __init__(self, session, message, main_instance):
+    def __init__(self, session, message):
         Screen.__init__(self, session)
-        self.main = main_instance
         self["goal_text"] = Label(message)
         
-        # Enable OK button to restore main window
         self["actions"] = ActionMap(["OkCancelActions"], 
         {
-            "ok": self.restoreMain,
+            "ok": self.close,
             "cancel": self.close
         }, -1)
         
-        # Auto close after 10 seconds
         self.timer = eTimer()
         self.timer.callback.append(self.close)
         self.timer.start(10000, True)
-
-    def restoreMain(self):
-        self.close()
-        # Bring main window back from background
-        self.main.showFromBackground()
 
 # --- SCREEN 2: MINI BAR ---
 class FootballScoresBar(Screen):
@@ -117,12 +109,12 @@ class FootballScoresBar(Screen):
 
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
-            "ok": self.closeBar,     # OK -> Return to Main
-            "cancel": self.closeBar, # EXIT -> Return to Main
+            "ok": self.closeBar,     
+            "cancel": self.closeBar, 
             "up": self.pageUp,
             "down": self.pageDown,
-            "green": self.closeBar,  # Green -> Return to Main
-            "blue": self.goToBackground, # Blue -> Background
+            "green": self.closeBar,  
+            "blue": self.goToBackground, 
             "yellow": self.main.toggleLiveMode,
         }, -1)
         
@@ -145,13 +137,14 @@ class FootballScoresBar(Screen):
         self["scores"].pageDown()
 
     def updateDisplay(self):
-        data = self.main.last_data
-        if not data:
+        # DEBUG: Ensure main data exists
+        if not hasattr(self.main, 'last_data') or not self.main.last_data:
             self["scores"].setText("Loading...")
             self.timer.start(1000, True)
             return
 
         try:
+            data = self.main.last_data
             matches = data.get("matches", [])
             display_matches = []
             
@@ -166,6 +159,7 @@ class FootballScoresBar(Screen):
             count = 0
             
             for match in display_matches:
+                # Use Main's helper
                 line = self.main.formatMatchLine(match, is_bar_mode=True)
                 match_strings.append(line)
                 count += 1
@@ -205,13 +199,11 @@ class FootballScoresScreen(Screen):
         self.session = session
         self.config = loadConfig()
         
-        # State variables
         self.last_data = shared_data 
         self.live_only = live_only_mode
         self.score_history = {} 
         self.is_hidden = False 
         
-        # Global instance
         global footscores_instance
         footscores_instance = self
         
@@ -226,9 +218,8 @@ class FootballScoresScreen(Screen):
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"],
         {
-            # CHANGED: OK button does NOTHING on main screen now
             "ok": self.doNothing, 
-            "cancel": self.quitPlugin, # EXIT closes app
+            "cancel": self.quitPlugin, 
             "menu": self.openMenu, 
             "up": self.pageUp,
             "down": self.pageDown,
@@ -276,7 +267,10 @@ class FootballScoresScreen(Screen):
             self.displayScores(self.last_data)
 
     def openBar(self):
-        self.session.open(FootballScoresBar, self)
+        try:
+            self.session.open(FootballScoresBar, self)
+        except Exception as e:
+            self["scores"].setText("Error opening Bar: " + str(e))
 
     def openMenu(self):
         options = [
@@ -331,8 +325,7 @@ class FootballScoresScreen(Screen):
                     return 
             
             msg = "GOAL! %s %d-%d %s" % (home, h_int, a_int, away)
-            # Pass self (Main Instance) to Popup so OK button works
-            self.session.open(GoalPopup, msg, self)
+            self.session.open(GoalPopup, msg)
 
     def formatMatchLine(self, match, is_bar_mode=False):
         self.checkGoals(match)
