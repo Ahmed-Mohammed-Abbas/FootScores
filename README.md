@@ -13,5 +13,6 @@ You can also display results for ongoing matches only by pressing the yellow but
 
 Installation is just extracting to the path:
 usr/lib/enigma2/python/Plugins/Extensions/
+
 Download from the repo.
 Cheers.
