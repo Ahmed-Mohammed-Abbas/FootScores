@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.9" 
+PLUGIN_VERSION = "1.1" 
 
 # DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
