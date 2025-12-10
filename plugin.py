@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1"
+PLUGIN_VERSION = "1.2" # Bumped version for new feature
 
 # DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -55,7 +55,7 @@ def saveConfig(config):
     except:
         return False
 
-# --- SCREEN 1: MAIN WINDOW (CENTER - Standard List) ---
+# --- SCREEN 1: MAIN WINDOW (CENTER) ---
 class FootballScoresScreen(Screen):
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
@@ -78,6 +78,7 @@ class FootballScoresScreen(Screen):
         # State variables
         self.last_data = shared_data 
         self.live_only = live_only_mode
+        self.score_history = {} # NEW: Dictionary to store { match_id: "1-0" }
         
         self["scores"] = ScrollLabel("")
         self["league_info"] = Label("")
@@ -107,7 +108,6 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
-        # Check updates after 3 seconds
         self.update_timer = eTimer()
         self.update_timer.callback.append(self.checkUpdates)
         self.update_timer.start(3000, True) 
@@ -122,6 +122,57 @@ class FootballScoresScreen(Screen):
                 self.timer.start(60000, True)
             else:
                 self.fetchScores()
+
+    # --- NEW HELPER FUNCTION TO FORMAT LINES & CHECK GOALS ---
+    def formatMatchLine(self, match, is_bar_mode=False):
+        home = match.get("homeTeam", {}).get("name", "Unknown")
+        away = match.get("awayTeam", {}).get("name", "Unknown")
+        status = match.get("status", "SCHEDULED")
+        score = match.get("score", {}).get("fullTime", {})
+        h_sc = str(score.get("home")) if score.get("home") is not None else "0"
+        a_sc = str(score.get("away")) if score.get("away") is not None else "0"
+        match_id = match.get("id", 0)
+        
+        # Determine Current Score String for comparison
+        current_score_str = "%s-%s" % (h_sc, a_sc)
+        
+        # Check History for GOAL
+        is_goal = False
+        if match_id in self.score_history:
+            if self.score_history[match_id] != current_score_str:
+                is_goal = True
+        
+        # Update History
+        self.score_history[match_id] = current_score_str
+        
+        # Truncate names for Bar Mode to fit 3 in a row
+        if is_bar_mode:
+            home = home[:10]
+            away = away[:10]
+
+        # Build Line
+        if status == "FINISHED":
+            line = "%s %s-%s %s (FT)" % (home, h_sc, a_sc, away)
+        elif status in ["IN_PLAY", "PAUSED"]:
+            minute = str(match.get("minute", ""))
+            line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
+            
+            # Add GOAL Indicator if detected
+            if is_goal:
+                line = ">>> GOAL <<< " + line
+                
+        else:
+            utc_date_str = match.get("utcDate", "")
+            try:
+                dt_utc = datetime.strptime(utc_date_str.replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
+                timestamp = calendar.timegm(dt_utc.timetuple())
+                local_struct = time.localtime(timestamp)
+                time_str = time.strftime("%H:%M", local_struct)
+            except:
+                time_str = utc_date_str[11:16] if len(utc_date_str) > 16 else "TBD"
+            line = "%s vs %s (%s)" % (home, away, time_str)
+            
+        return line
 
     def checkUpdates(self):
         try:
@@ -306,7 +357,6 @@ class FootballScoresScreen(Screen):
                 self.timer.start(60000, True)
 
     def displayScores(self, data):
-        # THIS FUNCTION IS FOR THE MAIN SCREEN (1 Match per line)
         try:
             matches = data.get("matches", [])
             display_matches = []
@@ -332,29 +382,8 @@ class FootballScoresScreen(Screen):
             count = 0
             
             for match in display_matches:
-                home = match.get("homeTeam", {}).get("name", "Unknown")
-                away = match.get("awayTeam", {}).get("name", "Unknown")
-                status = match.get("status", "SCHEDULED")
-                score = match.get("score", {}).get("fullTime", {})
-                h_sc = str(score.get("home")) if score.get("home") is not None else "0"
-                a_sc = str(score.get("away")) if score.get("away") is not None else "0"
-                
-                if status == "FINISHED":
-                    line = "%s %s-%s %s (FT)" % (home, h_sc, a_sc, away)
-                elif status in ["IN_PLAY", "PAUSED"]:
-                    minute = str(match.get("minute", ""))
-                    line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
-                else:
-                    utc_date_str = match.get("utcDate", "")
-                    try:
-                        dt_utc = datetime.strptime(utc_date_str.replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
-                        timestamp = calendar.timegm(dt_utc.timetuple())
-                        local_struct = time.localtime(timestamp)
-                        time_str = time.strftime("%H:%M", local_struct)
-                    except:
-                        time_str = utc_date_str[11:16] if len(utc_date_str) > 16 else "TBD"
-                    line = "%s vs %s (%s)" % (home, away, time_str)
-                
+                # USE NEW HELPER FUNCTION
+                line = self.formatMatchLine(match, is_bar_mode=False)
                 output += line + "\n"
                 count += 1
                 
@@ -367,7 +396,6 @@ class FootballScoresScreen(Screen):
 
 # --- SCREEN 2: MINI BAR (BOTTOM - Grid View) ---
 class FootballScoresBar(FootballScoresScreen):
-    # Position 930
     skin = """
         <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
             <widget name="scores" position="20,10" size="1860,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
@@ -400,13 +428,11 @@ class FootballScoresBar(FootballScoresScreen):
         self.session.open(FootballScoresScreen, self.last_data, self.live_only)
         self.close()
 
-    # --- OVERRIDDEN FUNCTION FOR GRID LAYOUT (3 PER ROW) ---
     def displayScores(self, data):
         try:
             matches = data.get("matches", [])
             display_matches = []
             
-            # 1. Filter
             if self.live_only:
                 for m in matches:
                     if m.get("status") in ["IN_PLAY", "PAUSED"]:
@@ -416,7 +442,6 @@ class FootballScoresBar(FootballScoresScreen):
                 display_matches = matches
                 mode_text = "ALL MATCHES"
 
-            # 2. Check Empty
             if not display_matches:
                 if self.live_only:
                     self["scores"].setText("No LIVE matches right now.")
@@ -425,49 +450,21 @@ class FootballScoresBar(FootballScoresScreen):
                 self["status"].setText("Mode: " + mode_text + " | 0 Matches")
                 return
             
-            # 3. Build String List
             match_strings = []
             count = 0
             
             for match in display_matches:
-                home = match.get("homeTeam", {}).get("name", "Unknown")
-                away = match.get("awayTeam", {}).get("name", "Unknown")
-                status = match.get("status", "SCHEDULED")
-                score = match.get("score", {}).get("fullTime", {})
-                h_sc = str(score.get("home")) if score.get("home") is not None else "0"
-                a_sc = str(score.get("away")) if score.get("away") is not None else "0"
-                
-                # Format Match String
-                if status == "FINISHED":
-                    line = "%s %s-%s %s (FT)" % (home, h_sc, a_sc, away)
-                elif status in ["IN_PLAY", "PAUSED"]:
-                    minute = str(match.get("minute", ""))
-                    line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
-                else:
-                    utc_date_str = match.get("utcDate", "")
-                    try:
-                        dt_utc = datetime.strptime(utc_date_str.replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
-                        timestamp = calendar.timegm(dt_utc.timetuple())
-                        local_struct = time.localtime(timestamp)
-                        time_str = time.strftime("%H:%M", local_struct)
-                    except:
-                        time_str = utc_date_str[11:16] if len(utc_date_str) > 16 else "TBD"
-                    line = "%s vs %s (%s)" % (home, away, time_str)
-                
+                # USE NEW HELPER FUNCTION (Grid Mode = True)
+                line = self.formatMatchLine(match, is_bar_mode=True)
                 match_strings.append(line)
                 count += 1
             
-            # 4. Group into rows of 3
             output = ""
-            # Loop through list with step 3
             for i in range(0, len(match_strings), 3):
-                # Get the next 3 items (or fewer if at the end)
                 chunk = match_strings[i:i+3]
-                # Join them with a clear separator
                 row_string = "   |   ".join(chunk)
                 output += row_string + "\n"
 
-            # 5. Set Text
             self["scores"].setText(output)
             self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Upd: Now")
             
