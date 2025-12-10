@@ -12,7 +12,7 @@ import os
 import json
 import time
 import calendar
-from datetime import datetime, timedelta # CHANGED: Added timedelta
+from datetime import datetime, timedelta
 
 # Networking imports
 try:
@@ -20,8 +20,14 @@ try:
 except ImportError:
     from urllib.request import Request, urlopen
 
-# Configuration file
+# --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
+
+# CHANGE THIS VERSION NUMBER HERE WHEN YOU RELEASE A NEW UPDATE
+PLUGIN_VERSION = "1.0"  
+
+# THIS IS YOUR SPECIFIC GITHUB URL
+UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt" 
 
 def loadConfig():
     default = {
@@ -34,8 +40,7 @@ def loadConfig():
             with open(CONFIG_FILE, 'r') as f:
                 saved = json.load(f)
                 default.update(saved)
-                
-            # Safety check - remove "ALL" if present
+            # Safety check to remove old "ALL" setting
             if default.get("filter_league") == "ALL":
                 default["filter_league"] = "PL"
                 default["league_name"] = "Premier League (England)"
@@ -78,7 +83,7 @@ class FootballScoresScreen(Screen):
         self["scores"] = ScrollLabel("")
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
-        self["credit"] = Label("By Reali22")
+        self["credit"] = Label("Ver: " + PLUGIN_VERSION + " | By Reali22")
         self["key_green"] = Label("Green: Mini Mode")
         self["key_yellow"] = Label("Yellow: Live Only")
         self["key_blue"] = Label("Blue: API Key")
@@ -103,6 +108,11 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
+        # Start update check with a small delay (2 seconds)
+        self.update_timer = eTimer()
+        self.update_timer.callback.append(self.checkUpdates)
+        self.update_timer.start(2000, True) 
+        
         api_key = self.config.get("api_key", "")
         
         if not api_key or len(api_key) < 5:
@@ -113,6 +123,21 @@ class FootballScoresScreen(Screen):
                 self.timer.start(60000, True)
             else:
                 self.fetchScores()
+
+    def checkUpdates(self):
+        """Fetches the version.txt from GitHub and compares it to internal version"""
+        try:
+            req = Request(UPDATE_URL)
+            # Short timeout to avoid freezing
+            response = urlopen(req, timeout=3)
+            remote_version = response.read().decode('utf-8').strip()
+            
+            if float(remote_version) > float(PLUGIN_VERSION):
+                self.session.open(MessageBox, 
+                    "New Update Available!\n\nCurrent Version: " + PLUGIN_VERSION + "\nNew Version: " + remote_version + "\n\nPlease update the plugin.", 
+                    MessageBox.TYPE_INFO)
+        except:
+            pass
 
     def toggleLiveMode(self):
         self.live_only = not self.live_only
@@ -197,7 +222,6 @@ class FootballScoresScreen(Screen):
                 self["status"].setText("Error: No API Key")
                 return
 
-            # --- DATE CALCULATION FIX ---
             try:
                 now = datetime.now()
             except:
@@ -205,8 +229,7 @@ class FootballScoresScreen(Screen):
 
             today_str = now.strftime("%Y-%m-%d")
             
-            # Logic: If it's early morning (00:00 to 06:00), fetch Yesterday + Today
-            # This ensures matches that started late last night are still visible.
+            # Late night logic: If between 00:00 and 06:00, fetch yesterday + today
             if now.hour < 6:
                 yesterday = now - timedelta(days=1)
                 date_from_str = yesterday.strftime("%Y-%m-%d")
@@ -218,7 +241,6 @@ class FootballScoresScreen(Screen):
             filter_code = self.config.get("filter_league", "PL")
             base_url = "https://api.football-data.org/v4/"
             
-            # Construct URL with dateFrom and dateTo
             if filter_code != "ALL":
                 url = base_url + "competitions/" + filter_code + "/matches?dateFrom=" + date_from_str + "&dateTo=" + date_to_str
             else:
