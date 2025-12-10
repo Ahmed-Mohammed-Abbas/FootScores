@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Debugged & Optimized
+PLUGIN_VERSION = "1.1" # Optimized Speed + New Button Layout
 
 # DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -59,8 +59,9 @@ def saveConfig(config):
     except:
         return False
 
-# --- GOAL NOTIFICATION POPUP (Simplified) ---
+# --- GOAL NOTIFICATION POPUP (BOTTOM SCREEN) ---
 class GoalPopup(Screen):
+    # Positioned at Bottom (950)
     skin = """
         <screen position="center,950" size="1200,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
             <widget name="goal_text" position="10,10" size="1180,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
@@ -70,17 +71,12 @@ class GoalPopup(Screen):
         Screen.__init__(self, session)
         self["goal_text"] = Label(message)
         
-        self["actions"] = ActionMap(["OkCancelActions"], 
-        {
-            "ok": self.close,
-            "cancel": self.close
-        }, -1)
-        
+        # Auto close after 10 seconds
         self.timer = eTimer()
         self.timer.callback.append(self.close)
         self.timer.start(10000, True)
 
-# --- SCREEN 2: MINI BAR ---
+# --- SCREEN 2: MINI BAR (Defined first) ---
 class FootballScoresBar(Screen):
     skin = """
         <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
@@ -97,10 +93,11 @@ class FootballScoresBar(Screen):
 
     def __init__(self, session, main_instance):
         Screen.__init__(self, session)
-        self.main = main_instance 
+        self.main = main_instance # Reference to Main Screen
         
         self["scores"] = ScrollLabel("")
         self["status"] = Label("")
+        
         self["league_info"] = Label("")
         self["credit"] = Label("")
         self["key_green"] = Label("")
@@ -109,16 +106,18 @@ class FootballScoresBar(Screen):
 
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
-            "ok": self.closeBar,     
-            "cancel": self.closeBar, 
+            "ok": self.closeBar,     # OK -> Return to Main
+            "cancel": self.closeBar, # EXIT -> Return to Main
             "up": self.pageUp,
             "down": self.pageDown,
-            "green": self.closeBar,  
-            "blue": self.goToBackground, 
+            "green": self.closeBar,  # Green (Toggle) -> Return to Main
+            "blue": self.goToBackground, # Blue -> Background
             "yellow": self.main.toggleLiveMode,
         }, -1)
         
         self.updateDisplay()
+        
+        # Check for updates from main every 2s (Fast UI update)
         self.timer = eTimer()
         self.timer.callback.append(self.updateDisplay)
         self.timer.start(2000, True) 
@@ -137,14 +136,14 @@ class FootballScoresBar(Screen):
         self["scores"].pageDown()
 
     def updateDisplay(self):
-        # DEBUG: Ensure main data exists
-        if not hasattr(self.main, 'last_data') or not self.main.last_data:
+        # Pull data from Main Instance
+        data = self.main.last_data
+        if not data:
             self["scores"].setText("Loading...")
             self.timer.start(1000, True)
             return
 
         try:
-            data = self.main.last_data
             matches = data.get("matches", [])
             display_matches = []
             
@@ -159,7 +158,6 @@ class FootballScoresBar(Screen):
             count = 0
             
             for match in display_matches:
-                # Use Main's helper
                 line = self.main.formatMatchLine(match, is_bar_mode=True)
                 match_strings.append(line)
                 count += 1
@@ -199,11 +197,13 @@ class FootballScoresScreen(Screen):
         self.session = session
         self.config = loadConfig()
         
+        # State variables
         self.last_data = shared_data 
         self.live_only = live_only_mode
         self.score_history = {} 
         self.is_hidden = False 
         
+        # Global instance tracking
         global footscores_instance
         footscores_instance = self
         
@@ -212,21 +212,22 @@ class FootballScoresScreen(Screen):
         self["status"] = Label("Initializing...")
         self["credit"] = Label("Ver: " + PLUGIN_VERSION + " | By Reali22")
         
+        # LABELS MATCHING YOUR REQUEST
         self["key_green"] = Label("Mini Bar")
         self["key_yellow"] = Label("Live Only")
         self["key_blue"] = Label("Background")
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"],
         {
-            "ok": self.doNothing, 
-            "cancel": self.quitPlugin, 
-            "menu": self.openMenu, 
+            "ok": self.hideToBackground, # OK -> Background
+            "cancel": self.hideToBackground, # EXIT -> Background
+            "menu": self.openMenu, # MENU -> API Key/Quit
             "up": self.pageUp,
             "down": self.pageDown,
-            "red": self.selectLeague,
-            "green": self.openBar, 
-            "yellow": self.toggleLiveMode,
-            "blue": self.hideToBackground,
+            "red": self.selectLeague, # RED -> Filter
+            "green": self.openBar,    # GREEN -> Mini Bar
+            "yellow": self.toggleLiveMode, # YELLOW -> Live Filter
+            "blue": self.hideToBackground, # BLUE -> Background
         }, -1)
         
         self.timer = eTimer()
@@ -248,17 +249,14 @@ class FootballScoresScreen(Screen):
         else:
             if self.last_data:
                 self.displayScores(self.last_data)
-                self.timer.start(15000, True) 
+                self.timer.start(15000, True) # 15s Fast Refresh
             else:
                 self.fetchScores()
-
-    def doNothing(self):
-        pass
 
     def hideToBackground(self):
         self.is_hidden = True
         self.hide()
-        self.session.open(MessageBox, "FootScores running in background.\nNotifications Enabled.\nPress MENU to quit completely.", MessageBox.TYPE_INFO, timeout=3)
+        self.session.open(MessageBox, "FootScores running in background.\nPress MENU to quit completely.", MessageBox.TYPE_INFO, timeout=3)
 
     def showFromBackground(self):
         self.is_hidden = False
@@ -267,10 +265,8 @@ class FootballScoresScreen(Screen):
             self.displayScores(self.last_data)
 
     def openBar(self):
-        try:
-            self.session.open(FootballScoresBar, self)
-        except Exception as e:
-            self["scores"].setText("Error opening Bar: " + str(e))
+        # Open Bar on top of Main
+        self.session.open(FootballScoresBar, self)
 
     def openMenu(self):
         options = [
@@ -364,6 +360,7 @@ class FootballScoresScreen(Screen):
         try:
             no_cache_url = UPDATE_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_url)
+            # Timeout 10s for fast check
             response = urlopen(req, timeout=10)
             remote_version = response.read().decode('utf-8').strip()
             
@@ -386,6 +383,7 @@ class FootballScoresScreen(Screen):
             self["status"].setText("Updating... Please wait.")
             no_cache_code = CODE_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_code)
+            # Timeout 20s for download
             response = urlopen(req, timeout=20)
             new_code = response.read()
             
@@ -516,6 +514,7 @@ class FootballScoresScreen(Screen):
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
             
+            # Timeout 10s for speed
             response = urlopen(req, timeout=10)
             data_string = response.read()
             
@@ -526,6 +525,7 @@ class FootballScoresScreen(Screen):
             self.last_data = data 
             self.displayScores(data)
             
+            # FAST REFRESH: 15 Seconds
             self.timer.start(15000, True)
             
         except Exception as e:
