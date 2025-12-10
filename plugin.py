@@ -23,8 +23,6 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-
-# KEEP THIS AT 1.1 ON GITHUB
 PLUGIN_VERSION = "1.1"
 
 # DIRECT LINKS TO YOUR REPO
@@ -57,7 +55,7 @@ def saveConfig(config):
     except:
         return False
 
-# --- SCREEN 1: MAIN WINDOW (CENTER) ---
+# --- SCREEN 1: MAIN WINDOW (CENTER - Standard List) ---
 class FootballScoresScreen(Screen):
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
@@ -89,7 +87,6 @@ class FootballScoresScreen(Screen):
         self["key_yellow"] = Label("Yellow: Live Only")
         self["key_blue"] = Label("Blue: API Key")
         
-        # CHANGED: Added repeat=False to up/down to make scrolling slower/controlled
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
             "ok": self.close,
@@ -110,7 +107,7 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
-        # Start update check with a delay
+        # Check updates after 3 seconds
         self.update_timer = eTimer()
         self.update_timer.callback.append(self.checkUpdates)
         self.update_timer.start(3000, True) 
@@ -127,12 +124,9 @@ class FootballScoresScreen(Screen):
                 self.fetchScores()
 
     def checkUpdates(self):
-        """Fetches version.txt and IGNORES CACHE"""
         try:
             no_cache_url = UPDATE_URL + "?t=" + str(int(time.time()))
-            
             req = Request(no_cache_url)
-            # Short timeout for version check
             response = urlopen(req, timeout=5)
             remote_version = response.read().decode('utf-8').strip()
             
@@ -153,10 +147,8 @@ class FootballScoresScreen(Screen):
     def performUpdate(self):
         try:
             self["status"].setText("Updating... Please wait.")
-            
             no_cache_code = CODE_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_code)
-            # Longer timeout for download
             response = urlopen(req, timeout=20)
             new_code = response.read()
             
@@ -286,10 +278,8 @@ class FootballScoresScreen(Screen):
             
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
-            # STABLE CONNECTION HEADERS
             req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
             
-            # Increased timeout to 30s
             response = urlopen(req, timeout=30)
             data_string = response.read()
             
@@ -305,7 +295,7 @@ class FootballScoresScreen(Screen):
             err_msg = str(e)
             if "403" in err_msg:
                  self["status"].setText("Error: Invalid API Key")
-                 self["scores"].setText("Your API key was rejected.\nPress BLUE to enter a new one.")
+                 self["scores"].setText("Your API key was rejected.")
             elif "429" in err_msg:
                  self["status"].setText("Error: Too Many Requests")
                  self["scores"].setText("API Limit Reached (Free Tier).\nWait a moment...")
@@ -316,6 +306,7 @@ class FootballScoresScreen(Screen):
                 self.timer.start(60000, True)
 
     def displayScores(self, data):
+        # THIS FUNCTION IS FOR THE MAIN SCREEN (1 Match per line)
         try:
             matches = data.get("matches", [])
             display_matches = []
@@ -334,7 +325,6 @@ class FootballScoresScreen(Screen):
                     self["scores"].setText("No LIVE matches right now.\n\nPress YELLOW to see Scheduled/Finished matches.")
                 else:
                     self["scores"].setText("No matches found.\nLeague: " + self.config.get("league_name", "Unknown"))
-                
                 self["status"].setText("Mode: " + mode_text + " | 0 Matches")
                 return
             
@@ -363,7 +353,6 @@ class FootballScoresScreen(Screen):
                         time_str = time.strftime("%H:%M", local_struct)
                     except:
                         time_str = utc_date_str[11:16] if len(utc_date_str) > 16 else "TBD"
-                        
                     line = "%s vs %s (%s)" % (home, away, time_str)
                 
                 output += line + "\n"
@@ -375,8 +364,10 @@ class FootballScoresScreen(Screen):
         except Exception as e:
             self["scores"].setText("Display Error: " + str(e))
 
+
+# --- SCREEN 2: MINI BAR (BOTTOM - Grid View) ---
 class FootballScoresBar(FootballScoresScreen):
-    # CHANGED: Position lowered from 900 to 930
+    # Position 930
     skin = """
         <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
             <widget name="scores" position="20,10" size="1860,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
@@ -393,7 +384,6 @@ class FootballScoresBar(FootballScoresScreen):
     def __init__(self, session, shared_data=None, live_only_mode=False):
         FootballScoresScreen.__init__(self, session, shared_data, live_only_mode)
         
-        # CHANGED: ActionMap repeat disabled for slower control
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
             "ok": self.close,
@@ -409,6 +399,80 @@ class FootballScoresBar(FootballScoresScreen):
     def switchToMain(self):
         self.session.open(FootballScoresScreen, self.last_data, self.live_only)
         self.close()
+
+    # --- OVERRIDDEN FUNCTION FOR GRID LAYOUT (3 PER ROW) ---
+    def displayScores(self, data):
+        try:
+            matches = data.get("matches", [])
+            display_matches = []
+            
+            # 1. Filter
+            if self.live_only:
+                for m in matches:
+                    if m.get("status") in ["IN_PLAY", "PAUSED"]:
+                        display_matches.append(m)
+                mode_text = "LIVE ONLY"
+            else:
+                display_matches = matches
+                mode_text = "ALL MATCHES"
+
+            # 2. Check Empty
+            if not display_matches:
+                if self.live_only:
+                    self["scores"].setText("No LIVE matches right now.")
+                else:
+                    self["scores"].setText("No matches found.")
+                self["status"].setText("Mode: " + mode_text + " | 0 Matches")
+                return
+            
+            # 3. Build String List
+            match_strings = []
+            count = 0
+            
+            for match in display_matches:
+                home = match.get("homeTeam", {}).get("name", "Unknown")
+                away = match.get("awayTeam", {}).get("name", "Unknown")
+                status = match.get("status", "SCHEDULED")
+                score = match.get("score", {}).get("fullTime", {})
+                h_sc = str(score.get("home")) if score.get("home") is not None else "0"
+                a_sc = str(score.get("away")) if score.get("away") is not None else "0"
+                
+                # Format Match String
+                if status == "FINISHED":
+                    line = "%s %s-%s %s (FT)" % (home, h_sc, a_sc, away)
+                elif status in ["IN_PLAY", "PAUSED"]:
+                    minute = str(match.get("minute", ""))
+                    line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
+                else:
+                    utc_date_str = match.get("utcDate", "")
+                    try:
+                        dt_utc = datetime.strptime(utc_date_str.replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
+                        timestamp = calendar.timegm(dt_utc.timetuple())
+                        local_struct = time.localtime(timestamp)
+                        time_str = time.strftime("%H:%M", local_struct)
+                    except:
+                        time_str = utc_date_str[11:16] if len(utc_date_str) > 16 else "TBD"
+                    line = "%s vs %s (%s)" % (home, away, time_str)
+                
+                match_strings.append(line)
+                count += 1
+            
+            # 4. Group into rows of 3
+            output = ""
+            # Loop through list with step 3
+            for i in range(0, len(match_strings), 3):
+                # Get the next 3 items (or fewer if at the end)
+                chunk = match_strings[i:i+3]
+                # Join them with a clear separator
+                row_string = "   |   ".join(chunk)
+                output += row_string + "\n"
+
+            # 5. Set Text
+            self["scores"].setText(output)
+            self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Upd: Now")
+            
+        except Exception as e:
+            self["scores"].setText("Display Error: " + str(e))
 
 def main(session, **kwargs):
     session.open(FootballScoresScreen)
