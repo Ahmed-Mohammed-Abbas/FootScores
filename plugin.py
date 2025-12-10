@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Updated for 30s Timer + Font Tweak
+PLUGIN_VERSION = "1.8" # Updated for Green Goal Banner
 
 # DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -57,10 +57,12 @@ def saveConfig(config):
 
 # --- SCREEN 1: MAIN WINDOW (CENTER) ---
 class FootballScoresScreen(Screen):
-    # UPDATED SKIN: FONTS REDUCED BY 15% FROM PREVIOUS VERSION
+    # UPDATED SKIN: ADDED "goal_banner" WIDGET
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
             <widget name="scores" position="10,10" size="680,350" font="Regular;26" />
+            
+            <widget name="goal_banner" position="10,150" size="680,60" font="Regular;30" halign="center" valign="center" foregroundColor="#00ff00" backgroundColor="#000000" zPosition="2" />
             
             <widget name="league_info" position="10,365" size="680,40" font="Regular;23" halign="center" foregroundColor="#ff0000" />
             
@@ -81,9 +83,12 @@ class FootballScoresScreen(Screen):
         # State variables
         self.last_data = shared_data 
         self.live_only = live_only_mode
-        self.score_history = {} 
+        self.score_history = {}
+        self.active_goals = [] # List to hold goals detected in current cycle
+        self.active_disallowed = [] # List for disallowed
         
         self["scores"] = ScrollLabel("")
+        self["goal_banner"] = Label("") # New Widget init
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
         self["credit"] = Label("Ver: " + PLUGIN_VERSION + " | By Reali22")
@@ -122,7 +127,6 @@ class FootballScoresScreen(Screen):
         else:
             if self.last_data:
                 self.displayScores(self.last_data)
-                # CHANGED: Start with 30s interval
                 self.timer.start(30000, True)
             else:
                 self.fetchScores()
@@ -161,6 +165,17 @@ class FootballScoresScreen(Screen):
                     is_goal = True
         
         self.score_history[match_id] = current_score_str
+
+        # --- UPDATE GOAL LISTS FOR BANNER ---
+        # Shorten names for banner to fit
+        short_home = home[:12]
+        short_away = away[:12]
+        
+        if is_goal:
+            self.active_goals.append("%s %s-%s %s" % (short_home, h_sc, a_sc, short_away))
+        if is_disallowed:
+            self.active_disallowed.append("%s %s-%s %s" % (short_home, h_sc, a_sc, short_away))
+        # ------------------------------------
         
         if is_bar_mode:
             home = home[:10]
@@ -172,8 +187,9 @@ class FootballScoresScreen(Screen):
             minute = str(match.get("minute", ""))
             line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
             
+            # Keep text indicators too, just in case
             if is_disallowed:
-                line = ">>> GOAL DISALLOWED! <<< " + line
+                line = ">>> VAR: GOAL DISALLOWED <<< " + line
             elif is_goal:
                 line = ">>> GOAL <<< " + line
         else:
@@ -355,7 +371,6 @@ class FootballScoresScreen(Screen):
             self.last_data = data 
             self.displayScores(data)
             
-            # CHANGED: 30000 ms (30 Seconds)
             self.timer.start(30000, True)
             
         except Exception as e:
@@ -366,16 +381,18 @@ class FootballScoresScreen(Screen):
             elif "429" in err_msg:
                  self["status"].setText("Error: Too Many Requests")
                  self["scores"].setText("API Limit Reached (Free Tier).\nWait a moment...")
-                 # Retry in 2 minutes
                  self.timer.start(120000, True)
             else:
                 self["status"].setText("Error: " + err_msg[:40])
                 self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 30s...")
-                # Retry in 30 seconds
                 self.timer.start(30000, True)
 
     def displayScores(self, data):
         try:
+            # RESET ACTIVE LISTS FOR NEW CYCLE
+            self.active_goals = []
+            self.active_disallowed = []
+            
             matches = data.get("matches", [])
             display_matches = []
             
@@ -394,6 +411,8 @@ class FootballScoresScreen(Screen):
                 else:
                     self["scores"].setText("No matches found.\nLeague: " + self.config.get("league_name", "Unknown"))
                 self["status"].setText("Mode: " + mode_text + " | 0 Matches")
+                # Clear banner if empty
+                self["goal_banner"].setText("") 
                 return
             
             output = ""
@@ -404,7 +423,20 @@ class FootballScoresScreen(Screen):
                 output += line + "\n"
                 count += 1
             
-            # CHANGED: ADDED TIMESTAMP TO STATUS
+            # --- HANDLE BANNER DISPLAY ---
+            if self.active_disallowed:
+                # RED for Disallowed (Overrides Goal)
+                self["goal_banner"].instance.setForegroundColor(0xFF0000) # Red
+                self["goal_banner"].setText("VAR: GOAL DISALLOWED!\n" + "\n".join(self.active_disallowed))
+            elif self.active_goals:
+                # GREEN for Goal
+                self["goal_banner"].instance.setForegroundColor(0x00FF00) # Green
+                self["goal_banner"].setText("GOAL!!!\n" + "\n".join(self.active_goals))
+            else:
+                # Clear if no action
+                self["goal_banner"].setText("")
+            # -----------------------------
+            
             current_time = time.strftime("%H:%M:%S")
             self["scores"].setText(output)
             self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Last Upd: " + current_time)
@@ -420,7 +452,7 @@ class FootballScoresBar(FootballScoresScreen):
             <widget name="scores" position="20,10" size="1860,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
             <widget name="status" position="20,110" size="1860,30" font="Regular;20" foregroundColor="#dddddd" transparent="1" />
             
-            <widget name="league_info" position="3000,3000" size="10,10" />
+            <widget name="goal_banner" position="3000,3000" size="10,10" /> <widget name="league_info" position="3000,3000" size="10,10" />
             <widget name="credit" position="3000,3000" size="10,10" />
             <widget name="key_green" position="3000,3000" size="10,10" />
             <widget name="key_yellow" position="3000,3000" size="10,10" />
@@ -449,6 +481,8 @@ class FootballScoresBar(FootballScoresScreen):
 
     def displayScores(self, data):
         try:
+            self.active_goals = [] # Reset, though we don't show banner in bar mode yet
+            
             matches = data.get("matches", [])
             display_matches = []
             
@@ -483,7 +517,6 @@ class FootballScoresBar(FootballScoresScreen):
                 row_string = "   |   ".join(chunk)
                 output += row_string + "\n"
 
-            # CHANGED: ADDED TIMESTAMP TO STATUS
             current_time = time.strftime("%H:%M:%S")
             self["scores"].setText(output)
             self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Last Upd: " + current_time)
