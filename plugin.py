@@ -7,6 +7,7 @@ from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.ScrollLabel import ScrollLabel
+from Screens.Standby import TryQuitMainloop 
 from enigma import eTimer
 import os
 import json
@@ -23,11 +24,12 @@ except ImportError:
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
 
-# CHANGE THIS VERSION NUMBER HERE WHEN YOU RELEASE A NEW UPDATE
-PLUGIN_VERSION = "1.0"  
+# --- VERSION CONTROL ---
+PLUGIN_VERSION = "1.0"
 
-# THIS IS YOUR SPECIFIC GITHUB URL
-UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt" 
+# DIRECT LINKS TO YOUR REPO
+UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
+CODE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/plugin.py"
 
 def loadConfig():
     default = {
@@ -40,7 +42,6 @@ def loadConfig():
             with open(CONFIG_FILE, 'r') as f:
                 saved = json.load(f)
                 default.update(saved)
-            # Safety check to remove old "ALL" setting
             if default.get("filter_league") == "ALL":
                 default["filter_league"] = "PL"
                 default["league_name"] = "Premier League (England)"
@@ -80,6 +81,10 @@ class FootballScoresScreen(Screen):
         self.last_data = shared_data 
         self.live_only = live_only_mode
         
+        # RATE LIMIT VARIABLES
+        self.api_calls_count = 0
+        self.api_window_start = time.time()
+        
         self["scores"] = ScrollLabel("")
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
@@ -108,10 +113,10 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
-        # Start update check with a small delay (2 seconds)
+        # Start update check with a delay
         self.update_timer = eTimer()
         self.update_timer.callback.append(self.checkUpdates)
-        self.update_timer.start(2000, True) 
+        self.update_timer.start(3000, True) 
         
         api_key = self.config.get("api_key", "")
         
@@ -125,19 +130,52 @@ class FootballScoresScreen(Screen):
                 self.fetchScores()
 
     def checkUpdates(self):
-        """Fetches the version.txt from GitHub and compares it to internal version"""
+        """Fetches version.txt and IGNORES CACHE"""
         try:
-            req = Request(UPDATE_URL)
-            # Short timeout to avoid freezing
-            response = urlopen(req, timeout=3)
+            no_cache_url = UPDATE_URL + "?t=" + str(int(time.time()))
+            req = Request(no_cache_url)
+            response = urlopen(req, timeout=5)
             remote_version = response.read().decode('utf-8').strip()
             
             if float(remote_version) > float(PLUGIN_VERSION):
-                self.session.open(MessageBox, 
-                    "New Update Available!\n\nCurrent Version: " + PLUGIN_VERSION + "\nNew Version: " + remote_version + "\n\nPlease update the plugin.", 
-                    MessageBox.TYPE_INFO)
+                self.session.openWithCallback(
+                    self.askUpdate, 
+                    MessageBox, 
+                    "New Update Available!\n\nLocal Ver: " + PLUGIN_VERSION + "\nOnline Ver: " + remote_version + "\n\nDo you want to update and restart now?", 
+                    MessageBox.TYPE_YESNO
+                )
         except:
             pass
+
+    def askUpdate(self, result):
+        if result:
+            self.performUpdate()
+
+    def performUpdate(self):
+        try:
+            self["status"].setText("Updating... Please wait.")
+            no_cache_code = CODE_URL + "?t=" + str(int(time.time()))
+            req = Request(no_cache_code)
+            response = urlopen(req, timeout=10)
+            new_code = response.read()
+            
+            target_path = os.path.abspath(__file__)
+            if target_path.endswith("pyc"):
+                target_path = target_path[:-1]
+            
+            with open(target_path, "wb") as f:
+                f.write(new_code)
+                
+            self.session.open(MessageBox, "Update Successful!\nGUI will restart now...", MessageBox.TYPE_INFO, timeout=3)
+            self.restart_timer = eTimer()
+            self.restart_timer.callback.append(self.doRestart)
+            self.restart_timer.start(3000, True)
+            
+        except Exception as e:
+            self.session.open(MessageBox, "Update Failed:\n" + str(e), MessageBox.TYPE_ERROR)
+
+    def doRestart(self):
+        self.session.open(TryQuitMainloop, 3)
 
     def toggleLiveMode(self):
         self.live_only = not self.live_only
@@ -216,6 +254,23 @@ class FootballScoresScreen(Screen):
         self.fetchScores()
 
     def fetchScores(self):
+        # --- RATE LIMIT CHECK (10 requests per minute) ---
+        now = time.time()
+        # Reset counter if more than 60 seconds have passed
+        if now - self.api_window_start > 60:
+            self.api_window_start = now
+            self.api_calls_count = 0
+
+        # If we hit the limit (10), stop and wait
+        if self.api_calls_count >= 10:
+            self["status"].setText("Rate Limit (Wait 5s...)")
+            # Retry in 5 seconds to see if window cleared
+            self.timer.start(5000, True) 
+            return
+
+        # Increment count
+        self.api_calls_count += 1
+        
         try:
             api_key = self.config.get("api_key", "")
             if not api_key:
@@ -223,15 +278,14 @@ class FootballScoresScreen(Screen):
                 return
 
             try:
-                now = datetime.now()
+                now_dt = datetime.now()
             except:
-                now = datetime.fromtimestamp(time.time())
+                now_dt = datetime.fromtimestamp(time.time())
 
-            today_str = now.strftime("%Y-%m-%d")
+            today_str = now_dt.strftime("%Y-%m-%d")
             
-            # Late night logic: If between 00:00 and 06:00, fetch yesterday + today
-            if now.hour < 6:
-                yesterday = now - timedelta(days=1)
+            if now_dt.hour < 6:
+                yesterday = now_dt - timedelta(days=1)
                 date_from_str = yesterday.strftime("%Y-%m-%d")
                 date_to_str = today_str
             else:
