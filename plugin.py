@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Rollback with new buttons
+PLUGIN_VERSION = "1.2" # OK Button Logic Fixed
 
 # DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -59,22 +59,131 @@ def saveConfig(config):
     except:
         return False
 
-# --- GOAL NOTIFICATION POPUP (BOTTOM SCREEN) ---
+# --- GOAL NOTIFICATION POPUP (INTERACTIVE) ---
 class GoalPopup(Screen):
-    # Positioned at Bottom (950)
     skin = """
         <screen position="center,950" size="1200,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
             <widget name="goal_text" position="10,10" size="1180,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
         </screen>
     """
-    def __init__(self, session, message):
+    def __init__(self, session, message, main_instance):
         Screen.__init__(self, session)
+        self.main = main_instance
         self["goal_text"] = Label(message)
+        
+        # Enable OK button to restore main window
+        self["actions"] = ActionMap(["OkCancelActions"], 
+        {
+            "ok": self.restoreMain,
+            "cancel": self.close
+        }, -1)
         
         # Auto close after 10 seconds
         self.timer = eTimer()
         self.timer.callback.append(self.close)
         self.timer.start(10000, True)
+
+    def restoreMain(self):
+        self.close()
+        # Bring main window back from background
+        self.main.showFromBackground()
+
+# --- SCREEN 2: MINI BAR ---
+class FootballScoresBar(Screen):
+    skin = """
+        <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
+            <widget name="scores" position="20,10" size="1860,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
+            <widget name="status" position="20,110" size="1860,30" font="Regular;20" foregroundColor="#dddddd" transparent="1" />
+            
+            <widget name="league_info" position="3000,3000" size="10,10" />
+            <widget name="credit" position="3000,3000" size="10,10" />
+            <widget name="key_green" position="3000,3000" size="10,10" />
+            <widget name="key_yellow" position="3000,3000" size="10,10" />
+            <widget name="key_blue" position="3000,3000" size="10,10" />
+        </screen>
+    """
+
+    def __init__(self, session, main_instance):
+        Screen.__init__(self, session)
+        self.main = main_instance 
+        
+        self["scores"] = ScrollLabel("")
+        self["status"] = Label("")
+        self["league_info"] = Label("")
+        self["credit"] = Label("")
+        self["key_green"] = Label("")
+        self["key_yellow"] = Label("")
+        self["key_blue"] = Label("")
+
+        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
+        {
+            "ok": self.closeBar,     # OK -> Return to Main
+            "cancel": self.closeBar, # EXIT -> Return to Main
+            "up": self.pageUp,
+            "down": self.pageDown,
+            "green": self.closeBar,  # Green -> Return to Main
+            "blue": self.goToBackground, # Blue -> Background
+            "yellow": self.main.toggleLiveMode,
+        }, -1)
+        
+        self.updateDisplay()
+        self.timer = eTimer()
+        self.timer.callback.append(self.updateDisplay)
+        self.timer.start(2000, True) 
+
+    def closeBar(self):
+        self.close()
+
+    def goToBackground(self):
+        self.close()
+        self.main.hideToBackground()
+
+    def pageUp(self):
+        self["scores"].pageUp()
+    
+    def pageDown(self):
+        self["scores"].pageDown()
+
+    def updateDisplay(self):
+        data = self.main.last_data
+        if not data:
+            self["scores"].setText("Loading...")
+            self.timer.start(1000, True)
+            return
+
+        try:
+            matches = data.get("matches", [])
+            display_matches = []
+            
+            if self.main.live_only:
+                for m in matches:
+                    if m.get("status") in ["IN_PLAY", "PAUSED"]:
+                        display_matches.append(m)
+            else:
+                display_matches = matches
+
+            match_strings = []
+            count = 0
+            
+            for match in display_matches:
+                line = self.main.formatMatchLine(match, is_bar_mode=True)
+                match_strings.append(line)
+                count += 1
+            
+            output = ""
+            for i in range(0, len(match_strings), 3):
+                chunk = match_strings[i:i+3]
+                row_string = "   |   ".join(chunk)
+                output += row_string + "\n"
+
+            current_time = time.strftime("%H:%M:%S")
+            self["scores"].setText(output)
+            self["status"].setText("Mode: Bar | Found: " + str(count) + " | Upd: " + current_time)
+            
+        except:
+            pass
+        
+        self.timer.start(2000, True)
 
 # --- SCREEN 1: MAIN WINDOW ---
 class FootballScoresScreen(Screen):
@@ -102,7 +211,7 @@ class FootballScoresScreen(Screen):
         self.score_history = {} 
         self.is_hidden = False 
         
-        # Global instance tracking
+        # Global instance
         global footscores_instance
         footscores_instance = self
         
@@ -110,21 +219,23 @@ class FootballScoresScreen(Screen):
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
         self["credit"] = Label("Ver: " + PLUGIN_VERSION + " | By Reali22")
+        
         self["key_green"] = Label("Mini Bar")
         self["key_yellow"] = Label("Live Only")
-        self["key_blue"] = Label("Background") # NEW LABEL
+        self["key_blue"] = Label("Background")
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"],
         {
-            "ok": self.hideToBackground, 
+            # CHANGED: OK button does NOTHING on main screen now
+            "ok": self.doNothing, 
             "cancel": self.quitPlugin, # EXIT closes app
-            "menu": self.openMenu, # MENU for options/API Key
+            "menu": self.openMenu, 
             "up": self.pageUp,
             "down": self.pageDown,
             "red": self.selectLeague,
-            "green": self.openBar, # GREEN -> Bar
+            "green": self.openBar, 
             "yellow": self.toggleLiveMode,
-            "blue": self.hideToBackground, # BLUE -> Background
+            "blue": self.hideToBackground,
         }, -1)
         
         self.timer = eTimer()
@@ -146,14 +257,17 @@ class FootballScoresScreen(Screen):
         else:
             if self.last_data:
                 self.displayScores(self.last_data)
-                self.timer.start(30000, True)
+                self.timer.start(15000, True) 
             else:
                 self.fetchScores()
+
+    def doNothing(self):
+        pass
 
     def hideToBackground(self):
         self.is_hidden = True
         self.hide()
-        self.session.open(MessageBox, "FootScores running in background.\nNotifications Enabled.\nPress MENU > Quit to stop.", MessageBox.TYPE_INFO, timeout=3)
+        self.session.open(MessageBox, "FootScores running in background.\nNotifications Enabled.\nPress MENU to quit completely.", MessageBox.TYPE_INFO, timeout=3)
 
     def showFromBackground(self):
         self.is_hidden = False
@@ -162,7 +276,6 @@ class FootballScoresScreen(Screen):
             self.displayScores(self.last_data)
 
     def openBar(self):
-        # Open Bar on top. Main stays running behind.
         self.session.open(FootballScoresBar, self)
 
     def openMenu(self):
@@ -170,7 +283,7 @@ class FootballScoresScreen(Screen):
             ("Change API Key", "apikey"),
             ("Quit Plugin Completely", "quit")
         ]
-        self.session.openWithCallback(self.menuCallback, ChoiceBox, title="Menu", list=options)
+        self.session.openWithCallback(self.menuCallback, ChoiceBox, title="Settings", list=options)
 
     def menuCallback(self, choice):
         if choice:
@@ -218,7 +331,8 @@ class FootballScoresScreen(Screen):
                     return 
             
             msg = "GOAL! %s %d-%d %s" % (home, h_int, a_int, away)
-            self.session.open(GoalPopup, msg)
+            # Pass self (Main Instance) to Popup so OK button works
+            self.session.open(GoalPopup, msg, self)
 
     def formatMatchLine(self, match, is_bar_mode=False):
         self.checkGoals(match)
@@ -257,7 +371,7 @@ class FootballScoresScreen(Screen):
         try:
             no_cache_url = UPDATE_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_url)
-            response = urlopen(req, timeout=5)
+            response = urlopen(req, timeout=10)
             remote_version = response.read().decode('utf-8').strip()
             
             if float(remote_version) > float(PLUGIN_VERSION):
@@ -338,7 +452,6 @@ class FootballScoresScreen(Screen):
         self.displayApiKeyPrompt()
     
     def switchToBar(self):
-        # Open Bar and close this Main screen
         self.session.open(FootballScoresBar, self.last_data, self.live_only, self.score_history)
         self.close() 
 
@@ -410,7 +523,7 @@ class FootballScoresScreen(Screen):
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
             
-            response = urlopen(req, timeout=30)
+            response = urlopen(req, timeout=10)
             data_string = response.read()
             
             try: data_string = data_string.decode('utf-8')
@@ -420,7 +533,7 @@ class FootballScoresScreen(Screen):
             self.last_data = data 
             self.displayScores(data)
             
-            self.timer.start(30000, True)
+            self.timer.start(15000, True)
             
         except Exception as e:
             err_msg = str(e)
@@ -429,12 +542,12 @@ class FootballScoresScreen(Screen):
                  self["scores"].setText("Your API key was rejected.")
             elif "429" in err_msg:
                  self["status"].setText("Error: Too Many Requests")
-                 self["scores"].setText("API Limit Reached (Free Tier).\nWait a moment...")
+                 self["scores"].setText("API Limit Reached. Slowing down...")
                  self.timer.start(120000, True)
             else:
                 self["status"].setText("Error: " + err_msg[:40])
-                self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 30s...")
-                self.timer.start(30000, True)
+                self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 15s...")
+                self.timer.start(15000, True)
 
     def displayScores(self, data):
         try:
@@ -474,88 +587,6 @@ class FootballScoresScreen(Screen):
         except Exception as e:
             if not self.is_hidden:
                 self["scores"].setText("Display Error: " + str(e))
-
-
-# --- SCREEN 2: MINI BAR (BOTTOM) ---
-class FootballScoresBar(FootballScoresScreen):
-    skin = """
-        <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
-            <widget name="scores" position="20,10" size="1860,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
-            <widget name="status" position="20,110" size="1860,30" font="Regular;20" foregroundColor="#dddddd" transparent="1" />
-            
-            <widget name="league_info" position="3000,3000" size="10,10" />
-            <widget name="credit" position="3000,3000" size="10,10" />
-            <widget name="key_green" position="3000,3000" size="10,10" />
-            <widget name="key_yellow" position="3000,3000" size="10,10" />
-            <widget name="key_blue" position="3000,3000" size="10,10" />
-        </screen>
-    """
-
-    def __init__(self, session, shared_data=None, live_only_mode=False, history=None):
-        FootballScoresScreen.__init__(self, session, shared_data, live_only_mode)
-        
-        if history:
-            self.score_history = history
-
-        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
-        {
-            "ok": self.switchToMain,
-            "cancel": self.switchToMain, # Exit Bar -> Return to Main
-            "up": self.pageUp,
-            "down": self.pageDown,
-            "red": self.selectLeague,
-            "green": self.switchToMain, # Bar -> Main
-            "yellow": self.toggleLiveMode,
-            "blue": self.changeApiKey,
-        }, -1)
-
-    def switchToMain(self):
-        self.close()
-        if footscores_instance:
-             footscores_instance.show()
-
-    def quitPlugin(self):
-        global footscores_instance
-        footscores_instance = None
-        self.timer.stop()
-        self.close()
-
-    def displayScores(self, data):
-        try:
-            matches = data.get("matches", [])
-            display_matches = []
-            
-            if self.live_only:
-                for m in matches:
-                    if m.get("status") in ["IN_PLAY", "PAUSED"]:
-                        display_matches.append(m)
-            else:
-                display_matches = matches
-
-            if not display_matches:
-                self["scores"].setText("No matches.")
-                return
-            
-            match_strings = []
-            count = 0
-            
-            for match in display_matches:
-                line = self.formatMatchLine(match, is_bar_mode=True)
-                match_strings.append(line)
-                count += 1
-            
-            output = ""
-            for i in range(0, len(match_strings), 3):
-                chunk = match_strings[i:i+3]
-                row_string = "   |   ".join(chunk)
-                output += row_string + "\n"
-
-            current_time = time.strftime("%H:%M:%S")
-            self["scores"].setText(output)
-            self["status"].setText("Mode: Bar | Found: " + str(count) + " | Upd: " + current_time)
-            
-        except Exception as e:
-            self["scores"].setText("Display Error: " + str(e))
 
 def main(session, **kwargs):
     global footscores_instance
