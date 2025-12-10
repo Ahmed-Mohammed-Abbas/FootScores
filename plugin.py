@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Fixed Resolution & Switching Logic
+PLUGIN_VERSION = "1.1" # Rollback + Freeze Fix
 
 # DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -61,36 +61,24 @@ def saveConfig(config):
 
 # --- GOAL NOTIFICATION POPUP ---
 class GoalPopup(Screen):
-    # Positioned safely for 720p/1080p
+    # Positioned at Bottom (950)
     skin = """
-        <screen position="center,600" size="1200,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
+        <screen position="center,950" size="1200,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
             <widget name="goal_text" position="10,10" size="1180,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
         </screen>
     """
-    def __init__(self, session, message, main_instance):
+    def __init__(self, session, message):
         Screen.__init__(self, session)
-        self.main = main_instance
         self["goal_text"] = Label(message)
         
-        # OK or BLUE restores the Main Window
-        self["actions"] = ActionMap(["OkCancelActions", "ColorActions"], 
-        {
-            "ok": self.restoreMain,
-            "blue": self.restoreMain,
-            "cancel": self.close
-        }, -1)
-        
+        # Simple auto-close
         self.timer = eTimer()
         self.timer.callback.append(self.close)
         self.timer.start(10000, True)
 
-    def restoreMain(self):
-        self.close()
-        self.main.showFromBackground()
-
 # --- SCREEN 2: MINI BAR ---
 class FootballScoresBar(Screen):
-    # CHANGED: Position y=600 to be safe for all resolutions
+    # Safe Position y=600
     skin = """
         <screen position="center,600" size="1200,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
             <widget name="scores" position="10,10" size="1180,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
@@ -108,6 +96,10 @@ class FootballScoresBar(Screen):
         Screen.__init__(self, session)
         self.main = main_instance 
         
+        # FREEZE FIX: Pause Main Timer while Bar is open
+        if self.main.timer.isActive():
+            self.main.timer.stop()
+
         self["scores"] = ScrollLabel("")
         self["status"] = Label("")
         
@@ -120,13 +112,13 @@ class FootballScoresBar(Screen):
 
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
-            "ok": self.returnToMain,     # OK -> Restore Main
-            "cancel": self.returnToMain, # EXIT -> Restore Main
+            "ok": self.closeBar,         
+            "cancel": self.closeBar,     
             "up": self.pageUp,
             "down": self.pageDown,
-            "green": self.returnToMain,  # GREEN -> Restore Main (Toggle)
+            "green": self.closeBar,      # GREEN -> Return to Main
             "blue": self.goToBackground, # BLUE -> Background
-            # Yellow is passed through logic only if needed, but simple is better
+            "yellow": self.toggleMainLive, # YELLOW -> Toggle Filter
         }, -1)
         
         self.updateDisplay()
@@ -134,16 +126,22 @@ class FootballScoresBar(Screen):
         self.timer.callback.append(self.updateDisplay)
         self.timer.start(2000, True) 
 
-    def returnToMain(self):
+    def closeBar(self):
         self.close()
-        # Show the main window again
+        # FREEZE FIX: Resume Main Timer
         self.main.show()
+        self.main.timer.start(15000, True)
 
     def goToBackground(self):
         self.close()
-        # Main is already hidden, so it stays hidden (Background Mode)
-        # Just ensure notification logic is active in Main
+        # FREEZE FIX: Resume Main Timer before hiding
+        self.main.timer.start(15000, True)
         self.main.hideToBackground()
+
+    def toggleMainLive(self):
+        # Call toggle on main, then update display immediately
+        self.main.toggleLiveMode()
+        self.updateDisplay()
 
     def pageUp(self):
         self["scores"].pageUp()
@@ -152,7 +150,6 @@ class FootballScoresBar(Screen):
         self["scores"].pageDown()
 
     def updateDisplay(self):
-        # Safety check
         if not hasattr(self.main, 'last_data') or not self.main.last_data:
             self["scores"].setText("Loading...")
             self.timer.start(1000, True)
@@ -174,7 +171,6 @@ class FootballScoresBar(Screen):
             count = 0
             
             for match in display_matches:
-                # Use Main's helper logic
                 line = self.main.formatMatchLine(match, is_bar_mode=True)
                 match_strings.append(line)
                 count += 1
@@ -214,13 +210,11 @@ class FootballScoresScreen(Screen):
         self.session = session
         self.config = loadConfig()
         
-        # State variables
         self.last_data = shared_data 
         self.live_only = live_only_mode
         self.score_history = {} 
         self.is_hidden = False 
         
-        # Global instance
         global footscores_instance
         footscores_instance = self
         
@@ -235,15 +229,15 @@ class FootballScoresScreen(Screen):
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"],
         {
-            "ok": self.hideToBackground, 
-            "cancel": self.quitPlugin, # EXIT closes app
+            "ok": self.hideToBackground, # OK -> Background (Standard V2.4)
+            "cancel": self.quitPlugin,   # EXIT -> Close
             "menu": self.openMenu, 
             "up": self.pageUp,
             "down": self.pageDown,
             "red": self.selectLeague,
-            "green": self.openBar, 
+            "green": self.openBar,       # GREEN -> Mini Bar
             "yellow": self.toggleLiveMode,
-            "blue": self.hideToBackground,
+            "blue": self.hideToBackground, # BLUE -> Background
         }, -1)
         
         self.timer = eTimer()
@@ -265,14 +259,14 @@ class FootballScoresScreen(Screen):
         else:
             if self.last_data:
                 self.displayScores(self.last_data)
-                self.timer.start(30000, True)
+                self.timer.start(15000, True) # 15s Refresh
             else:
                 self.fetchScores()
 
     def hideToBackground(self):
         self.is_hidden = True
-        self.hide() # Main Window Hides
-        self.session.open(MessageBox, "FootScores in Background.\nNotifications Active.\nPress MENU to quit.", MessageBox.TYPE_INFO, timeout=3)
+        self.hide()
+        self.session.open(MessageBox, "FootScores in Background.\nNotifications Active.\nPress MENU to quit.", MessageBox.TYPE_INFO, timeout=2)
 
     def showFromBackground(self):
         self.is_hidden = False
@@ -281,14 +275,13 @@ class FootballScoresScreen(Screen):
             self.displayScores(self.last_data)
 
     def openBar(self):
-        # Hide Main Window first to avoid overlapping text
+        # Explicitly hide Main to prevent overlap
         self.hide()
-        # Open Bar and pass 'self' so it can call show() later
         try:
             self.session.open(FootballScoresBar, self)
         except Exception as e:
-            self.show() # Restore main if bar fails
-            self["scores"].setText("Error: " + str(e))
+            self.show()
+            self["scores"].setText("Error opening Bar: " + str(e))
 
     def openMenu(self):
         options = [
@@ -343,7 +336,7 @@ class FootballScoresScreen(Screen):
                     return 
             
             msg = "GOAL! %s %d-%d %s" % (home, h_int, a_int, away)
-            self.session.open(GoalPopup, msg, self)
+            self.session.open(GoalPopup, msg)
 
     def formatMatchLine(self, match, is_bar_mode=False):
         self.checkGoals(match)
