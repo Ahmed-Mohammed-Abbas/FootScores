@@ -23,17 +23,21 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Updated for Green Goal Banner
+PLUGIN_VERSION = "1.9" 
 
-# DIRECT LINKS TO YOUR REPO
+# DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
 CODE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/plugin.py"
+
+# GLOBAL INSTANCE HOLDER (For Background Mode)
+footscores_instance = None
 
 def loadConfig():
     default = {
         "filter_league": "PL", 
         "league_name": "Premier League",
-        "api_key": ""
+        "api_key": "",
+        "favorite_team": "" # NEW: Filter notifications by team
     }
     try:
         if os.path.exists(CONFIG_FILE):
@@ -55,14 +59,28 @@ def saveConfig(config):
     except:
         return False
 
-# --- SCREEN 1: MAIN WINDOW (CENTER) ---
+# --- NEW: GOAL NOTIFICATION POPUP (BOTTOM SCREEN) ---
+class GoalPopup(Screen):
+    # Transparent background, positioned at bottom
+    skin = """
+        <screen position="center,600" size="1000,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
+            <widget name="goal_text" position="10,10" size="980,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
+        </screen>
+    """
+    def __init__(self, session, message):
+        Screen.__init__(self, session)
+        self["goal_text"] = Label(message)
+        
+        # Auto close after 10 seconds
+        self.timer = eTimer()
+        self.timer.callback.append(self.close)
+        self.timer.start(10000, True)
+
+# --- SCREEN 1: MAIN WINDOW ---
 class FootballScoresScreen(Screen):
-    # UPDATED SKIN: ADDED "goal_banner" WIDGET
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
             <widget name="scores" position="10,10" size="680,350" font="Regular;26" />
-            
-            <widget name="goal_banner" position="10,150" size="680,60" font="Regular;30" halign="center" valign="center" foregroundColor="#00ff00" backgroundColor="#000000" zPosition="2" />
             
             <widget name="league_info" position="10,365" size="680,40" font="Regular;23" halign="center" foregroundColor="#ff0000" />
             
@@ -83,27 +101,29 @@ class FootballScoresScreen(Screen):
         # State variables
         self.last_data = shared_data 
         self.live_only = live_only_mode
-        self.score_history = {}
-        self.active_goals = [] # List to hold goals detected in current cycle
-        self.active_disallowed = [] # List for disallowed
+        self.score_history = {} 
+        self.is_hidden = False # Track if we are in background mode
+        
+        # Global instance tracking
+        global footscores_instance
+        footscores_instance = self
         
         self["scores"] = ScrollLabel("")
-        self["goal_banner"] = Label("") # New Widget init
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
         self["credit"] = Label("Ver: " + PLUGIN_VERSION + " | By Reali22")
-        self["key_green"] = Label("Mini Mode")
+        self["key_green"] = Label("Background") # Renamed
         self["key_yellow"] = Label("Live Only")
         self["key_blue"] = Label("API Key")
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
-            "ok": self.close,
-            "cancel": self.close,
+            "ok": self.hideToBackground, # OK also hides now, standard behavior? Or stick to close?
+            "cancel": self.quitPlugin, # EXIT kills the app
             "up": self.pageUp,
             "down": self.pageDown,
             "red": self.selectLeague,
-            "green": self.switchToBar,
+            "green": self.hideToBackground, # NEW: Minimize
             "yellow": self.toggleLiveMode,
             "blue": self.changeApiKey,
         }, -1)
@@ -131,51 +151,75 @@ class FootballScoresScreen(Screen):
             else:
                 self.fetchScores()
 
+    def hideToBackground(self):
+        self.is_hidden = True
+        self.hide() # Enigma2 function to hide window
+        # We DO NOT stop the timer. It keeps running.
+
+    def showFromBackground(self):
+        self.is_hidden = False
+        self.show()
+        self.displayScores(self.last_data) # Refresh UI
+
+    def quitPlugin(self):
+        # Stop everything and really close
+        global footscores_instance
+        footscores_instance = None
+        self.timer.stop()
+        self.close()
+
+    def checkGoals(self, match):
+        # Helper to detect goals and notify if hidden
+        home = match.get("homeTeam", {}).get("name", "Unknown")
+        away = match.get("awayTeam", {}).get("name", "Unknown")
+        score = match.get("score", {}).get("fullTime", {})
+        
+        h_int = score.get("home") if score.get("home") is not None else 0
+        a_int = score.get("away") if score.get("away") is not None else 0
+        match_id = match.get("id", 0)
+        
+        current_score_str = "%s-%s" % (h_int, a_int)
+        
+        is_goal = False
+        
+        if match_id in self.score_history:
+            if self.score_history[match_id] != current_score_str:
+                # Score changed!
+                # Basic check: did total score increase?
+                try:
+                    old_parts = self.score_history[match_id].split('-')
+                    old_total = int(old_parts[0]) + int(old_parts[1])
+                    new_total = h_int + a_int
+                    if new_total > old_total:
+                        is_goal = True
+                except:
+                    pass
+        
+        self.score_history[match_id] = current_score_str
+        
+        # TRIGGER NOTIFICATION (Only if hidden + Goal detected)
+        if is_goal and self.is_hidden:
+            # Check "Favorite Team" filter
+            fav_team = self.config.get("favorite_team", "").lower()
+            if fav_team and len(fav_team) > 2:
+                # If filter is set, only notify if team name matches
+                if fav_team not in home.lower() and fav_team not in away.lower():
+                    return # Skip notification
+            
+            msg = "GOAL! %s %d-%d %s" % (home, h_int, a_int, away)
+            self.session.open(GoalPopup, msg)
+
     def formatMatchLine(self, match, is_bar_mode=False):
+        # Run the goal checker logic
+        self.checkGoals(match)
+        
         home = match.get("homeTeam", {}).get("name", "Unknown")
         away = match.get("awayTeam", {}).get("name", "Unknown")
         status = match.get("status", "SCHEDULED")
         score = match.get("score", {}).get("fullTime", {})
         
-        h_int = score.get("home") if score.get("home") is not None else 0
-        a_int = score.get("away") if score.get("away") is not None else 0
-        
-        h_sc = str(h_int)
-        a_sc = str(a_int)
-        match_id = match.get("id", 0)
-        
-        current_score_str = "%s-%s" % (h_sc, a_sc)
-        
-        is_goal = False
-        is_disallowed = False
-
-        if match_id in self.score_history:
-            old_score_str = self.score_history[match_id]
-            if old_score_str != current_score_str:
-                try:
-                    old_parts = old_score_str.split('-')
-                    old_total = int(old_parts[0]) + int(old_parts[1])
-                    new_total = h_int + a_int
-                    
-                    if new_total < old_total:
-                        is_disallowed = True
-                    else:
-                        is_goal = True
-                except:
-                    is_goal = True
-        
-        self.score_history[match_id] = current_score_str
-
-        # --- UPDATE GOAL LISTS FOR BANNER ---
-        # Shorten names for banner to fit
-        short_home = home[:12]
-        short_away = away[:12]
-        
-        if is_goal:
-            self.active_goals.append("%s %s-%s %s" % (short_home, h_sc, a_sc, short_away))
-        if is_disallowed:
-            self.active_disallowed.append("%s %s-%s %s" % (short_home, h_sc, a_sc, short_away))
-        # ------------------------------------
+        h_sc = str(score.get("home")) if score.get("home") is not None else "0"
+        a_sc = str(score.get("away")) if score.get("away") is not None else "0"
         
         if is_bar_mode:
             home = home[:10]
@@ -186,12 +230,6 @@ class FootballScoresScreen(Screen):
         elif status in ["IN_PLAY", "PAUSED"]:
             minute = str(match.get("minute", ""))
             line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
-            
-            # Keep text indicators too, just in case
-            if is_disallowed:
-                line = ">>> VAR: GOAL DISALLOWED <<< " + line
-            elif is_goal:
-                line = ">>> GOAL <<< " + line
         else:
             utc_date_str = match.get("utcDate", "")
             try:
@@ -291,7 +329,11 @@ class FootballScoresScreen(Screen):
     
     def switchToBar(self):
         self.session.open(FootballScoresBar, self.last_data, self.live_only)
-        self.close()
+        # We don't close self here, just open Bar on top? 
+        # Actually in Enigma2 screen stack, opening another screen puts this one in background.
+        # But for 'Bar Mode' we usually close 'Main Mode'.
+        # Let's keep existing logic:
+        self.hide() # Hide main, open bar
 
     def updateLeagueInfo(self):
         league_name = self.config.get("league_name", "Premier League")
@@ -389,10 +431,6 @@ class FootballScoresScreen(Screen):
 
     def displayScores(self, data):
         try:
-            # RESET ACTIVE LISTS FOR NEW CYCLE
-            self.active_goals = []
-            self.active_disallowed = []
-            
             matches = data.get("matches", [])
             display_matches = []
             
@@ -405,15 +443,7 @@ class FootballScoresScreen(Screen):
                 display_matches = matches
                 mode_text = "ALL MATCHES"
 
-            if not display_matches:
-                if self.live_only:
-                    self["scores"].setText("No LIVE matches right now.\n\nPress YELLOW to see Scheduled/Finished matches.")
-                else:
-                    self["scores"].setText("No matches found.\nLeague: " + self.config.get("league_name", "Unknown"))
-                self["status"].setText("Mode: " + mode_text + " | 0 Matches")
-                # Clear banner if empty
-                self["goal_banner"].setText("") 
-                return
+            # Even if hidden, we need to run formatMatchLine loop to check goals
             
             output = ""
             count = 0
@@ -423,36 +453,32 @@ class FootballScoresScreen(Screen):
                 output += line + "\n"
                 count += 1
             
-            # --- HANDLE BANNER DISPLAY ---
-            if self.active_disallowed:
-                # RED for Disallowed (Overrides Goal)
-                self["goal_banner"].instance.setForegroundColor(0xFF0000) # Red
-                self["goal_banner"].setText("VAR: GOAL DISALLOWED!\n" + "\n".join(self.active_disallowed))
-            elif self.active_goals:
-                # GREEN for Goal
-                self["goal_banner"].instance.setForegroundColor(0x00FF00) # Green
-                self["goal_banner"].setText("GOAL!!!\n" + "\n".join(self.active_goals))
-            else:
-                # Clear if no action
-                self["goal_banner"].setText("")
-            # -----------------------------
-            
-            current_time = time.strftime("%H:%M:%S")
-            self["scores"].setText(output)
-            self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Last Upd: " + current_time)
+            if not self.is_hidden:
+                if not display_matches:
+                    if self.live_only:
+                        self["scores"].setText("No LIVE matches right now.\n\nPress YELLOW to see Scheduled/Finished matches.")
+                    else:
+                        self["scores"].setText("No matches found.\nLeague: " + self.config.get("league_name", "Unknown"))
+                    self["status"].setText("Mode: " + mode_text + " | 0 Matches")
+                    return
+
+                current_time = time.strftime("%H:%M:%S")
+                self["scores"].setText(output)
+                self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Last Upd: " + current_time)
             
         except Exception as e:
-            self["scores"].setText("Display Error: " + str(e))
+            if not self.is_hidden:
+                self["scores"].setText("Display Error: " + str(e))
 
 
-# --- SCREEN 2: MINI BAR (BOTTOM - Grid View) ---
+# --- SCREEN 2: MINI BAR (BOTTOM) ---
 class FootballScoresBar(FootballScoresScreen):
     skin = """
         <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
             <widget name="scores" position="20,10" size="1860,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
             <widget name="status" position="20,110" size="1860,30" font="Regular;20" foregroundColor="#dddddd" transparent="1" />
             
-            <widget name="goal_banner" position="3000,3000" size="10,10" /> <widget name="league_info" position="3000,3000" size="10,10" />
+            <widget name="league_info" position="3000,3000" size="10,10" />
             <widget name="credit" position="3000,3000" size="10,10" />
             <widget name="key_green" position="3000,3000" size="10,10" />
             <widget name="key_yellow" position="3000,3000" size="10,10" />
@@ -461,12 +487,15 @@ class FootballScoresBar(FootballScoresScreen):
     """
 
     def __init__(self, session, shared_data=None, live_only_mode=False):
+        # We don't want to init full screen, just reuse logic? 
+        # Easier to just init basic Screen and copy logic or subclass.
+        # Subclassing is fine but we need to override the key actions to not close app.
         FootballScoresScreen.__init__(self, session, shared_data, live_only_mode)
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
-            "ok": self.close,
-            "cancel": self.close,
+            "ok": self.switchToMain,
+            "cancel": self.switchToMain,
             "up": self.pageUp,
             "down": self.pageDown,
             "red": self.selectLeague,
@@ -476,13 +505,16 @@ class FootballScoresBar(FootballScoresScreen):
         }, -1)
 
     def switchToMain(self):
-        self.session.open(FootballScoresScreen, self.last_data, self.live_only)
+        # Close bar, go back to main (which is hidden? or we open new?)
+        # Since we just 'hid' main to open bar, closing bar reveals main?
+        # Simpler: Close bar, re-open main logic handled by Session stack usually.
         self.close()
+        if footscores_instance:
+             footscores_instance.show()
 
     def displayScores(self, data):
+        # Simplified for Bar
         try:
-            self.active_goals = [] # Reset, though we don't show banner in bar mode yet
-            
             matches = data.get("matches", [])
             display_matches = []
             
@@ -490,17 +522,11 @@ class FootballScoresBar(FootballScoresScreen):
                 for m in matches:
                     if m.get("status") in ["IN_PLAY", "PAUSED"]:
                         display_matches.append(m)
-                mode_text = "LIVE ONLY"
             else:
                 display_matches = matches
-                mode_text = "ALL MATCHES"
 
             if not display_matches:
-                if self.live_only:
-                    self["scores"].setText("No LIVE matches right now.")
-                else:
-                    self["scores"].setText("No matches found.")
-                self["status"].setText("Mode: " + mode_text + " | 0 Matches")
+                self["scores"].setText("No matches.")
                 return
             
             match_strings = []
@@ -519,19 +545,24 @@ class FootballScoresBar(FootballScoresScreen):
 
             current_time = time.strftime("%H:%M:%S")
             self["scores"].setText(output)
-            self["status"].setText("Mode: " + mode_text + " | Found: " + str(count) + " | Last Upd: " + current_time)
+            self["status"].setText("Mode: Bar | Found: " + str(count) + " | Upd: " + current_time)
             
         except Exception as e:
             self["scores"].setText("Display Error: " + str(e))
 
 def main(session, **kwargs):
-    session.open(FootballScoresScreen)
+    # Check if instance exists and is just hidden
+    global footscores_instance
+    if footscores_instance:
+        footscores_instance.showFromBackground()
+    else:
+        session.open(FootballScoresScreen)
 
 def Plugins(**kwargs):
     return [
         PluginDescriptor(
             name="Football Scores",
-            description="Live scores with Mini-Bar mode",
+            description="Live scores with Background Mode",
             where=PluginDescriptor.WHERE_PLUGINMENU,
             icon="plugin.png",
             fnc=main
