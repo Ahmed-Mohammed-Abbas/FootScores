@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.0" # Updated for Multiple additions and enhancements. 
+PLUGIN_VERSION = "1.1" # New Version with enhancement.
 
 # DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -57,16 +57,19 @@ def saveConfig(config):
 
 # --- SCREEN 1: MAIN WINDOW (CENTER) ---
 class FootballScoresScreen(Screen):
+    # UPDATED SKIN: FONTS INCREASED BY ~50%
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
-            <widget name="scores" position="10,10" size="680,350" font="Regular;20" />
-            <widget name="league_info" position="10,370" size="680,30" font="Regular;18" halign="center" foregroundColor="#ff0000" />
-            <widget name="status" position="10,410" size="680,50" font="Regular;16" halign="center" />
+            <widget name="scores" position="10,10" size="680,350" font="Regular;30" />
             
-            <widget name="credit" position="10,480" size="200,30" font="Regular;16" halign="left" foregroundColor="#ffcc00" />
-            <widget name="key_green" position="220,480" size="150,30" font="Regular;16" halign="center" foregroundColor="#00ff00" />
-            <widget name="key_yellow" position="380,480" size="150,30" font="Regular;16" halign="center" foregroundColor="#ffff00" />
-            <widget name="key_blue" position="540,480" size="150,30" font="Regular;16" halign="right" foregroundColor="#00aaff" />
+            <widget name="league_info" position="10,365" size="680,40" font="Regular;27" halign="center" foregroundColor="#ff0000" />
+            
+            <widget name="status" position="10,410" size="680,50" font="Regular;24" halign="center" />
+            
+            <widget name="credit" position="10,475" size="200,40" font="Regular;24" halign="left" foregroundColor="#ffcc00" />
+            <widget name="key_green" position="220,475" size="150,40" font="Regular;24" halign="center" foregroundColor="#00ff00" />
+            <widget name="key_yellow" position="380,475" size="150,40" font="Regular;24" halign="center" foregroundColor="#ffff00" />
+            <widget name="key_blue" position="540,475" size="150,40" font="Regular;24" halign="right" foregroundColor="#00aaff" />
         </screen>
     """
     
@@ -84,9 +87,9 @@ class FootballScoresScreen(Screen):
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
         self["credit"] = Label("Ver: " + PLUGIN_VERSION + " | By Reali22")
-        self["key_green"] = Label("Green: Mini Mode")
-        self["key_yellow"] = Label("Yellow: Live Only")
-        self["key_blue"] = Label("Blue: API Key")
+        self["key_green"] = Label("Mini Mode")
+        self["key_yellow"] = Label("Live Only")
+        self["key_blue"] = Label("API Key")
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
@@ -123,14 +126,13 @@ class FootballScoresScreen(Screen):
             else:
                 self.fetchScores()
 
-    # --- UPDATED LOGIC FOR GOAL DISALLOWED ---
+    # --- GOAL LOGIC ---
     def formatMatchLine(self, match, is_bar_mode=False):
         home = match.get("homeTeam", {}).get("name", "Unknown")
         away = match.get("awayTeam", {}).get("name", "Unknown")
         status = match.get("status", "SCHEDULED")
         score = match.get("score", {}).get("fullTime", {})
         
-        # Get raw integers (safe default to 0)
         h_int = score.get("home") if score.get("home") is not None else 0
         a_int = score.get("away") if score.get("away") is not None else 0
         
@@ -140,31 +142,22 @@ class FootballScoresScreen(Screen):
         
         current_score_str = "%s-%s" % (h_sc, a_sc)
         
-        # Logic Flags
         is_goal = False
         is_disallowed = False
 
         if match_id in self.score_history:
             old_score_str = self.score_history[match_id]
-            
-            # If the text string is different, something changed
             if old_score_str != current_score_str:
                 try:
-                    # Calculate Old Total
                     old_parts = old_score_str.split('-')
                     old_total = int(old_parts[0]) + int(old_parts[1])
-                    
-                    # Calculate New Total
                     new_total = h_int + a_int
                     
                     if new_total < old_total:
-                        # Score went DOWN (e.g. 1-0 to 0-0)
                         is_disallowed = True
                     else:
-                        # Score went UP (e.g. 0-0 to 1-0)
                         is_goal = True
                 except:
-                    # Fallback if parsing fails, assume normal goal
                     is_goal = True
         
         self.score_history[match_id] = current_score_str
@@ -179,7 +172,6 @@ class FootballScoresScreen(Screen):
             minute = str(match.get("minute", ""))
             line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
             
-            # Add Indicators
             if is_disallowed:
                 line = ">>> GOAL DISALLOWED! <<< " + line
             elif is_goal:
@@ -252,9 +244,9 @@ class FootballScoresScreen(Screen):
 
     def updateYellowButtonLabel(self):
         if self.live_only:
-            self["key_yellow"].setText("Yellow: Show All")
+            self["key_yellow"].setText("Show All")
         else:
-            self["key_yellow"].setText("Yellow: Live Only")
+            self["key_yellow"].setText("Live Only")
 
     def displayApiKeyPrompt(self):
         try:
@@ -499,7 +491,7 @@ def Plugins(**kwargs):
     return [
         PluginDescriptor(
             name="Football Scores",
-            description="Live scores with Mini-Bar mode",
+            description="Live FB scores with Mini-Bar mode",
             where=PluginDescriptor.WHERE_PLUGINMENU,
             icon="plugin.png",
             fnc=main
