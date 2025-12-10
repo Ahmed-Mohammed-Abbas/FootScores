@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Updated Version
+PLUGIN_VERSION = "1.0" # Updated for Multiple additions and enhancements. 
 
 # DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -123,21 +123,49 @@ class FootballScoresScreen(Screen):
             else:
                 self.fetchScores()
 
+    # --- UPDATED LOGIC FOR GOAL DISALLOWED ---
     def formatMatchLine(self, match, is_bar_mode=False):
         home = match.get("homeTeam", {}).get("name", "Unknown")
         away = match.get("awayTeam", {}).get("name", "Unknown")
         status = match.get("status", "SCHEDULED")
         score = match.get("score", {}).get("fullTime", {})
-        h_sc = str(score.get("home")) if score.get("home") is not None else "0"
-        a_sc = str(score.get("away")) if score.get("away") is not None else "0"
+        
+        # Get raw integers (safe default to 0)
+        h_int = score.get("home") if score.get("home") is not None else 0
+        a_int = score.get("away") if score.get("away") is not None else 0
+        
+        h_sc = str(h_int)
+        a_sc = str(a_int)
         match_id = match.get("id", 0)
         
         current_score_str = "%s-%s" % (h_sc, a_sc)
         
+        # Logic Flags
         is_goal = False
+        is_disallowed = False
+
         if match_id in self.score_history:
-            if self.score_history[match_id] != current_score_str:
-                is_goal = True
+            old_score_str = self.score_history[match_id]
+            
+            # If the text string is different, something changed
+            if old_score_str != current_score_str:
+                try:
+                    # Calculate Old Total
+                    old_parts = old_score_str.split('-')
+                    old_total = int(old_parts[0]) + int(old_parts[1])
+                    
+                    # Calculate New Total
+                    new_total = h_int + a_int
+                    
+                    if new_total < old_total:
+                        # Score went DOWN (e.g. 1-0 to 0-0)
+                        is_disallowed = True
+                    else:
+                        # Score went UP (e.g. 0-0 to 1-0)
+                        is_goal = True
+                except:
+                    # Fallback if parsing fails, assume normal goal
+                    is_goal = True
         
         self.score_history[match_id] = current_score_str
         
@@ -150,7 +178,11 @@ class FootballScoresScreen(Screen):
         elif status in ["IN_PLAY", "PAUSED"]:
             minute = str(match.get("minute", ""))
             line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
-            if is_goal:
+            
+            # Add Indicators
+            if is_disallowed:
+                line = ">>> GOAL DISALLOWED! <<< " + line
+            elif is_goal:
                 line = ">>> GOAL <<< " + line
         else:
             utc_date_str = match.get("utcDate", "")
@@ -264,7 +296,6 @@ class FootballScoresScreen(Screen):
         self["scores"].pageDown()
     
     def selectLeague(self):
-        # UPDATED LIST: FREE TIER ONLY
         leagues = [
             ("Premier League", "PL"),
             ("Champions League", "CL"),
