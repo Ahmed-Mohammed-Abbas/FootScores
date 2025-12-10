@@ -8,7 +8,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.ScrollLabel import ScrollLabel
 from Screens.Standby import TryQuitMainloop 
-from enigma import eTimer, eLabel
+from enigma import eTimer
 import os
 import json
 import time
@@ -23,7 +23,11 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
+
+# KEEP THIS AT 1.1 ON GITHUB
 PLUGIN_VERSION = "1.1"
+
+# DIRECT LINKS TO YOUR REPO
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
 CODE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/plugin.py"
 
@@ -77,10 +81,6 @@ class FootballScoresScreen(Screen):
         self.last_data = shared_data 
         self.live_only = live_only_mode
         
-        # RATE LIMIT VARIABLES
-        self.api_calls_count = 0
-        self.api_window_start = time.time()
-        
         self["scores"] = ScrollLabel("")
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
@@ -89,6 +89,7 @@ class FootballScoresScreen(Screen):
         self["key_yellow"] = Label("Yellow: Live Only")
         self["key_blue"] = Label("Blue: API Key")
         
+        # CHANGED: Added repeat=False to up/down to make scrolling slower/controlled
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
             "ok": self.close,
@@ -109,6 +110,7 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
+        # Start update check with a delay
         self.update_timer = eTimer()
         self.update_timer.callback.append(self.checkUpdates)
         self.update_timer.start(3000, True) 
@@ -125,9 +127,12 @@ class FootballScoresScreen(Screen):
                 self.fetchScores()
 
     def checkUpdates(self):
+        """Fetches version.txt and IGNORES CACHE"""
         try:
             no_cache_url = UPDATE_URL + "?t=" + str(int(time.time()))
+            
             req = Request(no_cache_url)
+            # Short timeout for version check
             response = urlopen(req, timeout=5)
             remote_version = response.read().decode('utf-8').strip()
             
@@ -148,14 +153,16 @@ class FootballScoresScreen(Screen):
     def performUpdate(self):
         try:
             self["status"].setText("Updating... Please wait.")
+            
             no_cache_code = CODE_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_code)
-            response = urlopen(req, timeout=10)
+            # Longer timeout for download
+            response = urlopen(req, timeout=20)
             new_code = response.read()
             
             target_path = os.path.abspath(__file__)
             if target_path.endswith("pyc"):
-                target_path = target_path[:-1]
+                target_path = target_path[:-1] 
             
             with open(target_path, "wb") as f:
                 f.write(new_code)
@@ -247,7 +254,7 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.fetchScores()
 
-   def fetchScores(self):
+    def fetchScores(self):
         try:
             api_key = self.config.get("api_key", "")
             if not api_key:
@@ -279,12 +286,11 @@ class FootballScoresScreen(Screen):
             
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
-            # FIX 1: Add User-Agent to look like a PC Browser
+            # STABLE CONNECTION HEADERS
             req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
             
-            # FIX 2: Increase timeout from 10 to 30 seconds
+            # Increased timeout to 30s
             response = urlopen(req, timeout=30)
-            
             data_string = response.read()
             
             try: data_string = data_string.decode('utf-8')
@@ -303,10 +309,8 @@ class FootballScoresScreen(Screen):
             elif "429" in err_msg:
                  self["status"].setText("Error: Too Many Requests")
                  self["scores"].setText("API Limit Reached (Free Tier).\nWait a moment...")
-                 # Retry in 2 minutes instead of 1 if limit reached
                  self.timer.start(120000, True)
             else:
-                # Show the specific error in the small status bar
                 self["status"].setText("Error: " + err_msg[:40])
                 self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 60s...")
                 self.timer.start(60000, True)
@@ -371,138 +375,40 @@ class FootballScoresScreen(Screen):
         except Exception as e:
             self["scores"].setText("Display Error: " + str(e))
 
-
-# --- SCREEN 2: MINI TICKER BAR (BOTTOM) ---
-class FootballScoresBar(Screen):
-    # UPDATED SKIN: Height is now small (60) and background is semi-transparent black
+class FootballScoresBar(FootballScoresScreen):
+    # CHANGED: Position lowered from 900 to 930
     skin = """
-        <screen position="center,950" size="1900,60" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Ticker">
-            <widget name="ticker_label" position="0,5" size="1900,50" font="Regular;34" valign="center" halign="left" foregroundColor="#ffffff" transparent="1" noWrap="1" />
+        <screen position="center,930" size="1900,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
+            <widget name="scores" position="20,10" size="1860,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
+            <widget name="status" position="20,110" size="1860,30" font="Regular;20" foregroundColor="#dddddd" transparent="1" />
             
-            <widget name="status" position="3000,3000" size="10,10" />
             <widget name="league_info" position="3000,3000" size="10,10" />
-            <widget name="scores" position="3000,3000" size="10,10" />
+            <widget name="credit" position="3000,3000" size="10,10" />
             <widget name="key_green" position="3000,3000" size="10,10" />
             <widget name="key_yellow" position="3000,3000" size="10,10" />
             <widget name="key_blue" position="3000,3000" size="10,10" />
-            <widget name="credit" position="3000,3000" size="10,10" />
         </screen>
     """
 
     def __init__(self, session, shared_data=None, live_only_mode=False):
-        Screen.__init__(self, session)
-        self.session = session
-        self.last_data = shared_data
-        self.live_only = live_only_mode
-        self.config = loadConfig()
+        FootballScoresScreen.__init__(self, session, shared_data, live_only_mode)
         
-        self["ticker_label"] = Label("")
-        
-        # Dummy widgets to prevent crashes if base methods are called
-        self["status"] = Label("")
-        self["league_info"] = Label("")
-        self["scores"] = ScrollLabel("")
-        self["key_green"] = Label("")
-        self["key_yellow"] = Label("")
-        self["key_blue"] = Label("")
-        self["credit"] = Label("")
-
-        self["actions"] = ActionMap(["OkCancelActions", "ColorActions"],
+        # CHANGED: ActionMap repeat disabled for slower control
+        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
             "ok": self.close,
             "cancel": self.close,
+            "up": self.pageUp,
+            "down": self.pageDown,
+            "red": self.selectLeague,
             "green": self.switchToMain,
             "yellow": self.toggleLiveMode,
+            "blue": self.changeApiKey,
         }, -1)
-
-        self.ticker_timer = eTimer()
-        self.ticker_timer.callback.append(self.updateTicker)
-        
-        self.full_text = ""
-        self.display_text = ""
-        self.scroll_pos = 0
-        
-        self.onLayoutFinish.append(self.startTicker)
-
-    def startTicker(self):
-        if self.last_data:
-            self.prepareTickerText(self.last_data)
-        self.ticker_timer.start(200, False) # Speed: 200ms update
-
-    def prepareTickerText(self, data):
-        matches = data.get("matches", [])
-        display_matches = []
-        
-        if self.live_only:
-            for m in matches:
-                if m.get("status") in ["IN_PLAY", "PAUSED"]:
-                    display_matches.append(m)
-            prefix = "LIVE: "
-        else:
-            display_matches = matches
-            prefix = "ALL: "
-            
-        if not display_matches:
-            self.full_text = prefix + "No matches found..."
-        else:
-            text_parts = []
-            for match in display_matches:
-                home = match.get("homeTeam", {}).get("name", "?")
-                away = match.get("awayTeam", {}).get("name", "?")
-                status = match.get("status", "SCHEDULED")
-                score = match.get("score", {}).get("fullTime", {})
-                h_sc = str(score.get("home")) if score.get("home") is not None else "0"
-                a_sc = str(score.get("away")) if score.get("away") is not None else "0"
-                
-                if status == "FINISHED":
-                    line = "%s %s-%s %s (FT)" % (home, h_sc, a_sc, away)
-                elif status in ["IN_PLAY", "PAUSED"]:
-                    minute = str(match.get("minute", ""))
-                    line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
-                else:
-                    utc_date_str = match.get("utcDate", "")
-                    try:
-                        dt_utc = datetime.strptime(utc_date_str.replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
-                        timestamp = calendar.timegm(dt_utc.timetuple())
-                        local_struct = time.localtime(timestamp)
-                        time_str = time.strftime("%H:%M", local_struct)
-                    except:
-                        time_str = utc_date_str[11:16] if len(utc_date_str) > 16 else "TBD"
-                    line = "%s vs %s (%s)" % (home, away, time_str)
-                
-                text_parts.append(line)
-            
-            # Join with separator and add plenty of spacing for the loop effect
-            separator = "     |     " 
-            self.full_text = prefix + separator.join(text_parts) + separator + "   *** " 
-
-        # Reset Scroll
-        self.scroll_pos = 0
-
-    def updateTicker(self):
-        # Create a "Marquee" effect by slicing the string
-        # We add spaces to the end to make it loop smoothly
-        display_width = 150 # Characters to show at once
-        
-        padded_text = self.full_text + " " * 50 + self.full_text
-        
-        # Get the slice
-        self.display_text = padded_text[self.scroll_pos : self.scroll_pos + display_width]
-        self["ticker_label"].setText(self.display_text)
-        
-        self.scroll_pos += 1
-        if self.scroll_pos >= len(self.full_text) + 50:
-            self.scroll_pos = 0
 
     def switchToMain(self):
         self.session.open(FootballScoresScreen, self.last_data, self.live_only)
         self.close()
-        
-    def toggleLiveMode(self):
-        self.live_only = not self.live_only
-        # Re-parse the text with new filter
-        if self.last_data:
-            self.prepareTickerText(self.last_data)
 
 def main(session, **kwargs):
     session.open(FootballScoresScreen)
@@ -517,4 +423,3 @@ def Plugins(**kwargs):
             fnc=main
         )
     ]
-
