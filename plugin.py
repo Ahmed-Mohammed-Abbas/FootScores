@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.1" # Fixed "No Attribute Timer" Crash
+PLUGIN_VERSION = "1.1" # Smart Goal Text + Bottom Layout
 
 # DIRECT LINKS
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
@@ -89,8 +89,9 @@ class GoalPopup(Screen):
 
 # --- SCREEN 2: MINI BAR ---
 class FootballScoresBar(Screen):
+    # Position y=930 (Bottom of standard 1080p screen)
     skin = """
-        <screen position="center,600" size="1200,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
+        <screen position="center,930" size="1200,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
             <widget name="scores" position="10,10" size="1180,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
             <widget name="status" position="10,110" size="1180,30" font="Regular;20" foregroundColor="#dddddd" transparent="1" />
             
@@ -106,12 +107,11 @@ class FootballScoresBar(Screen):
         Screen.__init__(self, session)
         self.main = main_instance 
         
-        # --- FIX STARTS HERE ---
-        # 1. Initialize the Timer object FIRST
+        # 1. Init Timer First
         self.timer = eTimer()
         self.timer.callback.append(self.updateDisplay)
         
-        # 2. Define widgets
+        # 2. Init Widgets
         self["scores"] = ScrollLabel("")
         self["status"] = Label("")
         self["league_info"] = Label("")
@@ -120,7 +120,7 @@ class FootballScoresBar(Screen):
         self["key_yellow"] = Label("")
         self["key_blue"] = Label("")
 
-        # 3. Define Actions
+        # 3. Actions
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"],
         {
             "ok": self.closeBar,         
@@ -132,9 +132,8 @@ class FootballScoresBar(Screen):
             "yellow": self.main.toggleLiveMode,
         }, -1)
         
-        # 4. NOW call the display update (because self.timer now exists)
+        # 4. Start
         self.updateDisplay()
-        # --- FIX ENDS HERE ---
 
     def closeBar(self):
         self.close()
@@ -153,7 +152,6 @@ class FootballScoresBar(Screen):
     def updateDisplay(self):
         if not hasattr(self.main, 'last_data') or not self.main.last_data:
             self["scores"].setText("Loading...")
-            # Safe to call because self.timer exists now
             self.timer.start(1000, True)
             return
 
@@ -190,7 +188,6 @@ class FootballScoresBar(Screen):
         except:
             pass
         
-        # Safe to call
         self.timer.start(2000, True)
 
 # --- SCREEN 1: MAIN WINDOW ---
@@ -232,15 +229,15 @@ class FootballScoresScreen(Screen):
         
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"],
         {
-            "ok": self.doNothing,        # OK -> Nothing in Main
-            "cancel": self.quitPlugin,   # EXIT -> Quit
+            "ok": self.doNothing, 
+            "cancel": self.quitPlugin,   
             "menu": self.openMenu, 
             "up": self.pageUp,
             "down": self.pageDown,
             "red": self.selectLeague,
-            "green": self.openBar,       # GREEN -> Open Mini Bar
+            "green": self.openBar,       
             "yellow": self.toggleLiveMode,
-            "blue": self.hideToBackground, # BLUE -> Background
+            "blue": self.hideToBackground, 
         }, -1)
         
         self.timer = eTimer()
@@ -281,8 +278,7 @@ class FootballScoresScreen(Screen):
             self.displayScores(self.last_data)
 
     def openBar(self):
-        # Hide main to ensure clean view, then open bar
-        self.hide()
+        self.hide() # Ensure Main hides
         try:
             self.session.open(FootballScoresBar, self)
         except Exception as e:
@@ -294,7 +290,7 @@ class FootballScoresScreen(Screen):
             ("Change API Key", "apikey"),
             ("Quit Plugin Completely", "quit")
         ]
-        self.session.openWithCallback(self.menuCallback, ChoiceBox, title="Settings", list=options)
+        self.session.openWithCallback(self.menuCallback, ChoiceBox, title="Menu", list=options)
 
     def menuCallback(self, choice):
         if choice:
@@ -309,6 +305,7 @@ class FootballScoresScreen(Screen):
         self.timer.stop()
         self.close()
 
+    # --- SMART GOAL DETECTION & FORMATTING ---
     def checkGoals(self, match):
         home = match.get("homeTeam", {}).get("name", "Unknown")
         away = match.get("awayTeam", {}).get("name", "Unknown")
@@ -318,34 +315,48 @@ class FootballScoresScreen(Screen):
         a_int = score.get("away") if score.get("away") is not None else 0
         match_id = match.get("id", 0)
         
+        # Format for history: "HomeGoals-AwayGoals" (e.g. "1-0")
         current_score_str = "%s-%s" % (h_int, a_int)
         
-        is_goal = False
+        goal_event = None # None, 'home', 'away', 'disallowed'
         
         if match_id in self.score_history:
-            if self.score_history[match_id] != current_score_str:
+            old_str = self.score_history[match_id]
+            if old_str != current_score_str:
                 try:
-                    old_parts = self.score_history[match_id].split('-')
-                    old_total = int(old_parts[0]) + int(old_parts[1])
-                    new_total = h_int + a_int
-                    if new_total > old_total:
-                        is_goal = True
+                    # Logic to find WHO scored
+                    old_h, old_a = map(int, old_str.split('-'))
+                    
+                    if h_int > old_h:
+                        goal_event = 'home'
+                    elif a_int > old_a:
+                        goal_event = 'away'
+                    elif (h_int + a_int) < (old_h + old_a):
+                        goal_event = 'disallowed'
                 except:
                     pass
         
         self.score_history[match_id] = current_score_str
         
-        if is_goal and self.is_hidden:
+        # NOTIFICATION LOGIC
+        if goal_event and self.is_hidden:
             fav_team = self.config.get("favorite_team", "").lower()
             if fav_team and len(fav_team) > 2:
                 if fav_team not in home.lower() and fav_team not in away.lower():
                     return 
             
-            msg = "GOAL! %s %d-%d %s" % (home, h_int, a_int, away)
+            if goal_event == 'disallowed':
+                msg = "VAR: GOAL DISALLOWED!\n%s %d-%d %s" % (home, h_int, a_int, away)
+            else:
+                scorer = home if goal_event == 'home' else away
+                msg = "GOAL for %s!\n%s %d-%d %s" % (scorer, home, h_int, a_int, away)
+            
             self.session.open(GoalPopup, msg, self)
+            
+        return goal_event
 
     def formatMatchLine(self, match, is_bar_mode=False):
-        self.checkGoals(match)
+        goal_event = self.checkGoals(match) # Check for changes
         
         home = match.get("homeTeam", {}).get("name", "Unknown")
         away = match.get("awayTeam", {}).get("name", "Unknown")
@@ -359,11 +370,21 @@ class FootballScoresScreen(Screen):
             home = home[:10]
             away = away[:10]
 
+        # Apply Goal Text NEXT TO THE TEAM
+        if goal_event == 'home':
+            home = home + " (GOAL!)"
+        elif goal_event == 'away':
+            away = "(GOAL!) " + away
+        
         if status == "FINISHED":
             line = "%s %s-%s %s (FT)" % (home, h_sc, a_sc, away)
         elif status in ["IN_PLAY", "PAUSED"]:
             minute = str(match.get("minute", ""))
             line = "%s %s-%s %s (%s')" % (home, h_sc, a_sc, away, minute)
+            
+            if goal_event == 'disallowed':
+                line = ">>> VAR DISALLOWED <<< " + line
+                
         else:
             utc_date_str = match.get("utcDate", "")
             try:
