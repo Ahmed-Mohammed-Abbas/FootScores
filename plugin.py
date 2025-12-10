@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.0"
+PLUGIN_VERSION = "1.1"
 UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
 CODE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/plugin.py"
 
@@ -247,20 +247,7 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.fetchScores()
 
-    def fetchScores(self):
-        # Rate Limit Logic
-        now = time.time()
-        if now - self.api_window_start > 60:
-            self.api_window_start = now
-            self.api_calls_count = 0
-
-        if self.api_calls_count >= 10:
-            self["status"].setText("Rate Limit (Wait 5s...)")
-            self.timer.start(5000, True) 
-            return
-
-        self.api_calls_count += 1
-        
+   def fetchScores(self):
         try:
             api_key = self.config.get("api_key", "")
             if not api_key:
@@ -268,14 +255,14 @@ class FootballScoresScreen(Screen):
                 return
 
             try:
-                now_dt = datetime.now()
+                now = datetime.now()
             except:
-                now_dt = datetime.fromtimestamp(time.time())
+                now = datetime.fromtimestamp(time.time())
 
-            today_str = now_dt.strftime("%Y-%m-%d")
+            today_str = now.strftime("%Y-%m-%d")
             
-            if now_dt.hour < 6:
-                yesterday = now_dt - timedelta(days=1)
+            if now.hour < 6:
+                yesterday = now - timedelta(days=1)
                 date_from_str = yesterday.strftime("%Y-%m-%d")
                 date_to_str = today_str
             else:
@@ -292,7 +279,12 @@ class FootballScoresScreen(Screen):
             
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
-            response = urlopen(req, timeout=10)
+            # FIX 1: Add User-Agent to look like a PC Browser
+            req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+            
+            # FIX 2: Increase timeout from 10 to 30 seconds
+            response = urlopen(req, timeout=30)
+            
             data_string = response.read()
             
             try: data_string = data_string.decode('utf-8')
@@ -308,9 +300,16 @@ class FootballScoresScreen(Screen):
             if "403" in err_msg:
                  self["status"].setText("Error: Invalid API Key")
                  self["scores"].setText("Your API key was rejected.\nPress BLUE to enter a new one.")
+            elif "429" in err_msg:
+                 self["status"].setText("Error: Too Many Requests")
+                 self["scores"].setText("API Limit Reached (Free Tier).\nWait a moment...")
+                 # Retry in 2 minutes instead of 1 if limit reached
+                 self.timer.start(120000, True)
             else:
+                # Show the specific error in the small status bar
                 self["status"].setText("Error: " + err_msg[:40])
-                self["scores"].setText("Connection error.\nWait 60s...")
+                self["scores"].setText("Connection error: " + err_msg + "\n\nRetrying in 60s...")
+                self.timer.start(60000, True)
 
     def displayScores(self, data):
         try:
@@ -518,3 +517,4 @@ def Plugins(**kwargs):
             fnc=main
         )
     ]
+
