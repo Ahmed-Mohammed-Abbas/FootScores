@@ -14,9 +14,10 @@ You can also display results for ongoing matches only by pressing the yellow but
 Download the FootScores files from the repo.
 
 
-Installation is just extracting to the path:
+Installation is just extracting the zip file to the path:
 usr/lib/enigma2/python/Plugins/Extensions/
 
+telnet: cd /tmp && wget https://github.com/Ahmed-Mohammed-Abbas/FootScores/archive/refs/heads/main.zip && unzip main.zip && cp -r FootScores-main/* /usr/lib/enigma2/python/Plugins/Extensions/ 
 
 
 New Version (1.1)
