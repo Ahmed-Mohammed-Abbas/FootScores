@@ -3,7 +3,7 @@ For Enigma2 devices.
 The application was built, and the plugin was tested on my personal device VU+ Zero4k.
 OpenBH 5.6 image.
 
-Note: You need an API key for the plugin to work by registering on the Data Football website.
+Note: You need an API key for the plugin to work by registering on the www.football-data.org/client/register website.
 The process is easy; you just need to register on the site, and the key will be sent to your email.
 
 Enter the API key when running the plugin by pressing the blue button on the remote control.
