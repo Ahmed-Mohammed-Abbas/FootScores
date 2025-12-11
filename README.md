@@ -11,7 +11,7 @@ You can choose matches according to each tournament by pressing the red button o
 You can also change the display of match results as a bar at the bottom of the screen by pressing the green button on the remote control.
 You can also display results for ongoing matches only by pressing the yellow button on the remote control.
 
-Download plugin.py from the repo.
+Download the FootScores files from the repo.
 
 
 Installation is just extracting to the path:
