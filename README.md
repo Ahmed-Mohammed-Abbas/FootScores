@@ -23,7 +23,8 @@ New Version (1.1)
 Enhancements include:
 
 - Automatically request an update to the plugin when a new version is available.
+- New background mode, shows notification bar only when goals scored.
 - Increased the font size.
 - The mini bar mode shows 3 Matches in each row.
-- Legues updated to only the free tier of Football.org.
+- Legues updated to only the free tier of Data-Football.org.
 - Goal and Goal Disallow notifications.
