@@ -48,5 +48,5 @@ mkdir -p /usr/lib/enigma2/python/Plugins/Extensions/FootScores
 # 2. Download the plugin file
 wget https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/plugin.py -O /usr/lib/enigma2/python/Plugins/Extensions/FootScores/plugin.py
 
-# 3. (Optional) If you uploaded goal.mp3 to your repo, download it to the right place:
+# 3. download goal.mp3 to your repo, download it to the right place:
 wget https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/goal.mp3 -O /etc/enigma2/goal.mp3
