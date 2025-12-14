@@ -23,7 +23,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.2" # Forced ALSA Sink + No Aplay
+PLUGIN_VERSION = "1.2" # Sound Enabled in All Modes
 
 # PATHS
 PLUGIN_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -65,7 +65,6 @@ def saveConfig(config):
 
 # --- GOAL NOTIFICATION POPUP ---
 class GoalPopup(Screen):
-    # Positioned at Bottom (950)
     skin = """
         <screen position="center,950" size="1200,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
             <widget name="goal_text" position="10,10" size="1180,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
@@ -110,7 +109,6 @@ class FootballScoresBar(Screen):
         Screen.__init__(self, session)
         self.main = main_instance 
         
-        # Init Timer First
         self.timer = eTimer()
         self.timer.callback.append(self.updateDisplay)
         
@@ -248,7 +246,6 @@ class FootballScoresScreen(Screen):
         self.timer = eTimer()
         self.timer.callback.append(self.fetchScores)
         
-        # Sound delay timer
         self.sound_timer = eTimer()
         self.sound_timer.callback.append(self.playGoalSound)
         
@@ -318,7 +315,6 @@ class FootballScoresScreen(Screen):
         self.timer.stop()
         self.close()
 
-    # --- NOISE-FREE AUDIO PLAYER (Fixed for ALSA) ---
     def playGoalSound(self):
         path1 = os.path.join(PLUGIN_PATH, SOUND_FILENAME)
         path2 = "/etc/enigma2/" + SOUND_FILENAME
@@ -337,8 +333,6 @@ class FootballScoresScreen(Screen):
             if not self.is_hidden:
                 self["status"].setText("Playing Sound... " + SOUND_FILENAME)
             
-            # Use 'alsasink' explicitly to stop the noise and 'playbin' to decode MP3 correctly
-            #
             cmd = "gst-launch-1.0 playbin uri=file://%s audio-sink='alsasink' volume=0.4 > /dev/null 2>&1 &" % final_path
             os.system(cmd)
         else:
@@ -363,7 +357,6 @@ class FootballScoresScreen(Screen):
             if old_str != current_score_str:
                 try:
                     old_h, old_a = map(int, old_str.split('-'))
-                    
                     if h_int > old_h:
                         goal_event = 'home'
                     elif a_int > old_a:
@@ -375,20 +368,26 @@ class FootballScoresScreen(Screen):
         
         self.score_history[match_id] = current_score_str
         
-        if goal_event and self.is_hidden:
-            fav_team = self.config.get("favorite_team", "").lower()
-            if fav_team and len(fav_team) > 2:
-                if fav_team not in home.lower() and fav_team not in away.lower():
-                    return 
-            
-            if goal_event == 'disallowed':
-                msg = "VAR: GOAL DISALLOWED!\n%s %d-%d %s" % (home, h_int, a_int, away)
-            else:
-                scorer = home if goal_event == 'home' else away
-                msg = "GOAL for %s!\n%s %d-%d %s" % (scorer, home, h_int, a_int, away)
+        # --- MODIFIED: Sound plays regardless of visibility ---
+        if goal_event:
+            # Play Sound immediately for goals (ignore disallowed sound if prefer)
+            if goal_event != 'disallowed':
                 self.playGoalSound()
-            
-            self.session.open(GoalPopup, msg, self)
+
+            # Notification Popup ONLY if hidden
+            if self.is_hidden:
+                fav_team = self.config.get("favorite_team", "").lower()
+                if fav_team and len(fav_team) > 2:
+                    if fav_team not in home.lower() and fav_team not in away.lower():
+                        return 
+                
+                if goal_event == 'disallowed':
+                    msg = "VAR: GOAL DISALLOWED!\n%s %d-%d %s" % (home, h_int, a_int, away)
+                else:
+                    scorer = home if goal_event == 'home' else away
+                    msg = "GOAL for %s!\n%s %d-%d %s" % (scorer, home, h_int, a_int, away)
+                
+                self.session.open(GoalPopup, msg, self)
             
         return goal_event
 
@@ -407,7 +406,6 @@ class FootballScoresScreen(Screen):
             home = home[:10]
             away = away[:10]
 
-        # Apply Goal Text NEXT TO TEAM
         if goal_event == 'home':
             home = home + " (GOAL!)"
         elif goal_event == 'away':
