@@ -23,12 +23,15 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-SOUND_FILE = "/etc/enigma2/goal.mp3" # <--- PUT YOUR MP3 FILE HERE
-PLUGIN_VERSION = "1.2" # Added Sound Support
+PLUGIN_VERSION = "1.2" # Startup and Goal Sound Added
 
-# DIRECT LINKS
-UPDATE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/version.txt"
-CODE_URL = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/plugin.py"
+# DYNAMIC PATHS
+PLUGIN_PATH = os.path.dirname(os.path.abspath(__file__))
+SOUND_FILE = os.path.join(PLUGIN_PATH, "goal.mp3")
+
+# GITHUB REPO BASE URL
+REPO_BASE = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/"
+VERSION_URL = REPO_BASE + "version.txt"
 
 # GLOBAL INSTANCE HOLDER
 footscores_instance = None
@@ -108,7 +111,7 @@ class FootballScoresBar(Screen):
         Screen.__init__(self, session)
         self.main = main_instance 
         
-        # Init Timer First (Fix for crash)
+        # Init Timer First
         self.timer = eTimer()
         self.timer.callback.append(self.updateDisplay)
         
@@ -139,7 +142,6 @@ class FootballScoresBar(Screen):
 
     def goToBackground(self):
         self.close()
-        # Use timer to safely transition to background
         self.bg_timer = eTimer()
         self.bg_timer.callback.append(self.triggerMainHide)
         self.bg_timer.start(100, True)
@@ -252,6 +254,9 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
+        # PLAY SOUND ON STARTUP
+        self.playGoalSound()
+        
         self.update_timer = eTimer()
         self.update_timer.callback.append(self.checkUpdates)
         self.update_timer.start(3000, True) 
@@ -294,7 +299,7 @@ class FootballScoresScreen(Screen):
             ("Change API Key", "apikey"),
             ("Quit Plugin Completely", "quit")
         ]
-        self.session.openWithCallback(self.menuCallback, ChoiceBox, title="Settings", list=options)
+        self.session.openWithCallback(self.menuCallback, ChoiceBox, title="Menu", list=options)
 
     def menuCallback(self, choice):
         if choice:
@@ -356,7 +361,6 @@ class FootballScoresScreen(Screen):
             else:
                 scorer = home if goal_event == 'home' else away
                 msg = "GOAL for %s!\n%s %d-%d %s" % (scorer, home, h_int, a_int, away)
-                # PLAY SOUND
                 self.playGoalSound()
             
             self.session.open(GoalPopup, msg, self)
@@ -407,7 +411,7 @@ class FootballScoresScreen(Screen):
 
     def checkUpdates(self):
         try:
-            no_cache_url = UPDATE_URL + "?t=" + str(int(time.time()))
+            no_cache_url = VERSION_URL + "?t=" + str(int(time.time()))
             req = Request(no_cache_url)
             response = urlopen(req, timeout=10)
             remote_version = response.read().decode('utf-8').strip()
@@ -429,18 +433,21 @@ class FootballScoresScreen(Screen):
     def performUpdate(self):
         try:
             self["status"].setText("Updating... Please wait.")
-            no_cache_code = CODE_URL + "?t=" + str(int(time.time()))
-            req = Request(no_cache_code)
-            response = urlopen(req, timeout=20)
-            new_code = response.read()
             
-            target_path = os.path.abspath(__file__)
-            if target_path.endswith("pyc"):
-                target_path = target_path[:-1] 
+            # FILES TO DOWNLOAD AUTOMATICALLY
+            files_to_download = ["plugin.py", "goal.mp3", "plugin.png"]
             
-            with open(target_path, "wb") as f:
-                f.write(new_code)
+            for filename in files_to_download:
+                url = REPO_BASE + filename + "?t=" + str(int(time.time()))
+                local_path = os.path.join(PLUGIN_PATH, filename)
                 
+                req = Request(url)
+                response = urlopen(req, timeout=15)
+                data = response.read()
+                
+                with open(local_path, "wb") as f:
+                    f.write(data)
+            
             self.session.open(MessageBox, "Update Successful!\nGUI will restart now...", MessageBox.TYPE_INFO, timeout=3)
             self.restart_timer = eTimer()
             self.restart_timer.callback.append(self.doRestart)
