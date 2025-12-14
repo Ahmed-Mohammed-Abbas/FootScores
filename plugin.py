@@ -23,11 +23,11 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.2" # Startup and Goal Sound Added
+PLUGIN_VERSION = "1.2" # Startup Sound Delay Fix
 
-# DYNAMIC PATHS
+# PATHS
 PLUGIN_PATH = os.path.dirname(os.path.abspath(__file__))
-SOUND_FILE = os.path.join(PLUGIN_PATH, "goal.mp3")
+SOUND_FILENAME = "goal.mp3" 
 
 # GITHUB REPO BASE URL
 REPO_BASE = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/"
@@ -65,7 +65,6 @@ def saveConfig(config):
 
 # --- GOAL NOTIFICATION POPUP ---
 class GoalPopup(Screen):
-    # Positioned at Bottom (950)
     skin = """
         <screen position="center,950" size="1200,100" flags="wfNoBorder" backgroundColor="#41000000" title="Goal Notification">
             <widget name="goal_text" position="10,10" size="1180,80" font="Regular;32" foregroundColor="#00ff00" valign="center" halign="center" transparent="1" />
@@ -93,7 +92,6 @@ class GoalPopup(Screen):
 
 # --- SCREEN 2: MINI BAR ---
 class FootballScoresBar(Screen):
-    # Position y=930
     skin = """
         <screen position="center,930" size="1200,150" flags="wfNoBorder" backgroundColor="#40000000" title="FootScores Bar">
             <widget name="scores" position="10,10" size="1180,100" font="Regular;24" foregroundColor="#ffffff" transparent="1" />
@@ -111,7 +109,6 @@ class FootballScoresBar(Screen):
         Screen.__init__(self, session)
         self.main = main_instance 
         
-        # Init Timer First
         self.timer = eTimer()
         self.timer.callback.append(self.updateDisplay)
         
@@ -248,14 +245,20 @@ class FootballScoresScreen(Screen):
         
         self.timer = eTimer()
         self.timer.callback.append(self.fetchScores)
+        
+        # New Timer purely for Sound Delay
+        self.sound_timer = eTimer()
+        self.sound_timer.callback.append(self.playGoalSound)
+        
         self.onLayoutFinish.append(self.startPlugin)
     
     def startPlugin(self):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
-        # PLAY SOUND ON STARTUP
-        self.playGoalSound()
+        # FIX: DELAY SOUND BY 1 SECOND (1000ms)
+        # This gives the system time to load the screen before playing audio
+        self.sound_timer.start(1000, True) 
         
         self.update_timer = eTimer()
         self.update_timer.callback.append(self.checkUpdates)
@@ -314,11 +317,31 @@ class FootballScoresScreen(Screen):
         self.timer.stop()
         self.close()
 
+    # --- SMART SOUND PLAYER ---
     def playGoalSound(self):
-        if os.path.exists(SOUND_FILE):
+        # 1. Check Plugin Folder
+        path1 = os.path.join(PLUGIN_PATH, SOUND_FILENAME)
+        # 2. Check /etc/enigma2/
+        path2 = "/etc/enigma2/" + SOUND_FILENAME
+        # 3. Check /usr/share/enigma2/ (Common media)
+        path3 = "/usr/share/enigma2/" + SOUND_FILENAME
+        
+        final_path = None
+        
+        if os.path.exists(path1):
+            final_path = path1
+        elif os.path.exists(path2):
+            final_path = path2
+        elif os.path.exists(path3):
+            final_path = path3
+            
+        if final_path:
             # Play MP3 using GStreamer in background
-            cmd = "gst-launch-1.0 playbin uri=file://%s > /dev/null 2>&1 &" % SOUND_FILE
+            print("[FootScores] Playing sound from: " + final_path)
+            cmd = "gst-launch-1.0 playbin uri=file://%s > /dev/null 2>&1 &" % final_path
             os.system(cmd)
+        else:
+            print("[FootScores] Sound file not found: goal.mp3")
 
     def checkGoals(self, match):
         home = match.get("homeTeam", {}).get("name", "Unknown")
@@ -434,7 +457,6 @@ class FootballScoresScreen(Screen):
         try:
             self["status"].setText("Updating... Please wait.")
             
-            # FILES TO DOWNLOAD AUTOMATICALLY
             files_to_download = ["plugin.py", "goal.mp3", "plugin.png"]
             
             for filename in files_to_download:
