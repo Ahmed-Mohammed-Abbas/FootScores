@@ -7,8 +7,9 @@ from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.ScrollLabel import ScrollLabel
+from Components.Pixmap import Pixmap # Needed for Cover Image
 from Screens.Standby import TryQuitMainloop 
-from enigma import eTimer
+from enigma import eTimer, ePicLoad
 import os
 import json
 import time
@@ -23,11 +24,12 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.2" # Sound Enabled in All Modes
+PLUGIN_VERSION = "1.2" # Cover Image + Silent Sound
 
 # PATHS
 PLUGIN_PATH = os.path.dirname(os.path.abspath(__file__))
 SOUND_FILENAME = "goal.mp3" 
+ICON_FILENAME = "plugin.png"
 
 # GITHUB REPO BASE URL
 REPO_BASE = "https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/"
@@ -197,14 +199,17 @@ class FootballScoresBar(Screen):
 class FootballScoresScreen(Screen):
     skin = """
         <screen position="center,center" size="700,520" title="Live Football Scores">
-            <widget name="scores" position="10,10" size="680,350" font="Regular;26" />
-            <widget name="league_info" position="10,365" size="680,40" font="Regular;23" halign="center" foregroundColor="#ff0000" />
-            <widget name="status" position="10,410" size="680,50" font="Regular;20" halign="center" />
-            <widget name="credit" position="10,475" size="200,40" font="Regular;20" halign="left" foregroundColor="#ffcc00" />
+            <widget name="cover_bg" position="0,0" size="700,520" zPosition="10" backgroundColor="#000000" />
+            <widget name="cover_img" position="250,160" size="200,200" zPosition="11" alphatest="on" />
             
-            <widget name="key_green" position="220,475" size="150,40" font="Regular;20" halign="center" foregroundColor="#00ff00" />
-            <widget name="key_yellow" position="380,475" size="150,40" font="Regular;20" halign="center" foregroundColor="#ffff00" />
-            <widget name="key_blue" position="540,475" size="150,40" font="Regular;20" halign="right" foregroundColor="#00aaff" />
+            <widget name="scores" position="10,10" size="680,350" font="Regular;26" zPosition="1" />
+            <widget name="league_info" position="10,365" size="680,40" font="Regular;23" halign="center" foregroundColor="#ff0000" zPosition="1" />
+            <widget name="status" position="10,410" size="680,50" font="Regular;20" halign="center" zPosition="1" />
+            <widget name="credit" position="10,475" size="200,40" font="Regular;20" halign="left" foregroundColor="#ffcc00" zPosition="1" />
+            
+            <widget name="key_green" position="220,475" size="150,40" font="Regular;20" halign="center" foregroundColor="#00ff00" zPosition="1" />
+            <widget name="key_yellow" position="380,475" size="150,40" font="Regular;20" halign="center" foregroundColor="#ffff00" zPosition="1" />
+            <widget name="key_blue" position="540,475" size="150,40" font="Regular;20" halign="right" foregroundColor="#00aaff" zPosition="1" />
         </screen>
     """
     
@@ -221,6 +226,11 @@ class FootballScoresScreen(Screen):
         global footscores_instance
         footscores_instance = self
         
+        # Cover Widgets
+        self["cover_bg"] = Label("")
+        self["cover_img"] = Pixmap()
+        
+        # Main Widgets
         self["scores"] = ScrollLabel("")
         self["league_info"] = Label("")
         self["status"] = Label("Initializing...")
@@ -246,8 +256,13 @@ class FootballScoresScreen(Screen):
         self.timer = eTimer()
         self.timer.callback.append(self.fetchScores)
         
+        # Audio Timer
         self.sound_timer = eTimer()
         self.sound_timer.callback.append(self.playGoalSound)
+        
+        # Cover Hide Timer
+        self.cover_timer = eTimer()
+        self.cover_timer.callback.append(self.hideCover)
         
         self.onLayoutFinish.append(self.startPlugin)
     
@@ -255,9 +270,16 @@ class FootballScoresScreen(Screen):
         self.updateLeagueInfo()
         self.updateYellowButtonLabel()
         
-        # Play Sound (with 1s delay)
-        self.sound_timer.start(1000, True) 
+        # 1. SETUP COVER IMAGE (using plugin.png)
+        icon_path = os.path.join(PLUGIN_PATH, ICON_FILENAME)
+        if os.path.exists(icon_path):
+            self["cover_img"].instance.setPixmapFromFile(icon_path)
         
+        # 2. STARTUP SEQUENCE
+        self.sound_timer.start(1000, True) # Play sound at 1s
+        self.cover_timer.start(3000, True) # Hide cover at 3s
+        
+        # 3. START DATA FETCH
         self.update_timer = eTimer()
         self.update_timer.callback.append(self.checkUpdates)
         self.update_timer.start(3000, True) 
@@ -272,6 +294,11 @@ class FootballScoresScreen(Screen):
                 self.timer.start(15000, True) 
             else:
                 self.fetchScores()
+
+    def hideCover(self):
+        # Hide the splash screen widgets
+        self["cover_bg"].hide()
+        self["cover_img"].hide()
 
     def doNothing(self):
         pass
@@ -330,14 +357,9 @@ class FootballScoresScreen(Screen):
             final_path = path3
             
         if final_path:
-            if not self.is_hidden:
-                self["status"].setText("Playing Sound... " + SOUND_FILENAME)
-            
+            # Silent in status bar now (User Request)
             cmd = "gst-launch-1.0 playbin uri=file://%s audio-sink='alsasink' volume=0.4 > /dev/null 2>&1 &" % final_path
             os.system(cmd)
-        else:
-            if not self.is_hidden:
-                self["status"].setText("Error: goal.mp3 not found!")
 
     def checkGoals(self, match):
         home = match.get("homeTeam", {}).get("name", "Unknown")
@@ -368,26 +390,20 @@ class FootballScoresScreen(Screen):
         
         self.score_history[match_id] = current_score_str
         
-        # --- MODIFIED: Sound plays regardless of visibility ---
-        if goal_event:
-            # Play Sound immediately for goals (ignore disallowed sound if prefer)
-            if goal_event != 'disallowed':
+        if goal_event and self.is_hidden:
+            fav_team = self.config.get("favorite_team", "").lower()
+            if fav_team and len(fav_team) > 2:
+                if fav_team not in home.lower() and fav_team not in away.lower():
+                    return 
+            
+            if goal_event == 'disallowed':
+                msg = "VAR: GOAL DISALLOWED!\n%s %d-%d %s" % (home, h_int, a_int, away)
+            else:
+                scorer = home if goal_event == 'home' else away
+                msg = "GOAL for %s!\n%s %d-%d %s" % (scorer, home, h_int, a_int, away)
                 self.playGoalSound()
-
-            # Notification Popup ONLY if hidden
-            if self.is_hidden:
-                fav_team = self.config.get("favorite_team", "").lower()
-                if fav_team and len(fav_team) > 2:
-                    if fav_team not in home.lower() and fav_team not in away.lower():
-                        return 
-                
-                if goal_event == 'disallowed':
-                    msg = "VAR: GOAL DISALLOWED!\n%s %d-%d %s" % (home, h_int, a_int, away)
-                else:
-                    scorer = home if goal_event == 'home' else away
-                    msg = "GOAL for %s!\n%s %d-%d %s" % (scorer, home, h_int, a_int, away)
-                
-                self.session.open(GoalPopup, msg, self)
+            
+            self.session.open(GoalPopup, msg, self)
             
         return goal_event
 
@@ -456,25 +472,19 @@ class FootballScoresScreen(Screen):
     def performUpdate(self):
         try:
             self["status"].setText("Updating... Please wait.")
-            
             files_to_download = ["plugin.py", "goal.mp3", "plugin.png"]
-            
             for filename in files_to_download:
                 url = REPO_BASE + filename + "?t=" + str(int(time.time()))
                 local_path = os.path.join(PLUGIN_PATH, filename)
-                
                 req = Request(url)
                 response = urlopen(req, timeout=15)
                 data = response.read()
-                
                 with open(local_path, "wb") as f:
                     f.write(data)
-            
             self.session.open(MessageBox, "Update Successful!\nGUI will restart now...", MessageBox.TYPE_INFO, timeout=3)
             self.restart_timer = eTimer()
             self.restart_timer.callback.append(self.doRestart)
             self.restart_timer.start(3000, True)
-            
         except Exception as e:
             self.session.open(MessageBox, "Update Failed:\n" + str(e), MessageBox.TYPE_ERROR)
 
@@ -523,7 +533,7 @@ class FootballScoresScreen(Screen):
         self.close() 
 
     def updateLeagueInfo(self):
-        league_name = self.config.get("league_name", "Premier League")
+        league_name = self.config.get("league_name", "All Competitions")
         self["league_info"].setText("Filter: " + league_name)
     
     def pageUp(self):
@@ -534,6 +544,7 @@ class FootballScoresScreen(Screen):
     
     def selectLeague(self):
         leagues = [
+            ("All Competitions (Global)", "GLOBAL"),
             ("Premier League", "PL"),
             ("Champions League", "CL"),
             ("Primera Division", "PD"),
@@ -579,13 +590,13 @@ class FootballScoresScreen(Screen):
                 date_from_str = today_str
                 date_to_str = today_str
 
-            filter_code = self.config.get("filter_league", "PL")
+            filter_code = self.config.get("filter_league", "GLOBAL")
             base_url = "https://api.football-data.org/v4/"
             
-            if filter_code != "ALL":
-                url = base_url + "competitions/" + filter_code + "/matches?dateFrom=" + date_from_str + "&dateTo=" + date_to_str
+            if filter_code == "GLOBAL":
+                url = base_url + "matches?dateFrom=" + date_from_str + "&dateTo=" + date_to_str
             else:
-                url = base_url + "competitions/PL/matches?dateFrom=" + date_from_str + "&dateTo=" + date_to_str
+                url = base_url + "competitions/" + filter_code + "/matches?dateFrom=" + date_from_str + "&dateTo=" + date_to_str
             
             req = Request(url)
             req.add_header('X-Auth-Token', api_key)
