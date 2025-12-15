@@ -50,3 +50,10 @@ wget https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/plug
 
 # 3. download goal.mp3 to your repo, download it to the right place:
 wget https://raw.githubusercontent.com/Ahmed-Mohammed-Abbas/FootScores/main/goal.mp3 -O /usr/lib/enigma2/python/Plugins/Extensions/FootScores/goal.mp3
+
+New Version (1.3)
+Enhancements include:
+- Updated plugin version to 1.3 and adjusted league filtering logic. 
+- Modified cover image widget properties and improved error handling.
+
+
