@@ -24,7 +24,7 @@ except ImportError:
 
 # --- CONFIGURATION & CONSTANTS ---
 CONFIG_FILE = "/etc/enigma2/footscores_config.json"
-PLUGIN_VERSION = "1.3" # Removed "All Competitions" (Unstable on Free Tier)
+PLUGIN_VERSION = "1.4" # Removed "All Competitions" (Unstable on Free Tier)
 
 # PATHS
 PLUGIN_PATH = os.path.dirname(os.path.abspath(__file__))
