@@ -17,8 +17,7 @@ Download the FootScores files from the repo.
 Installation is just extracting the zip file to the path:
 usr/lib/enigma2/python/Plugins/Extensions/
 
-telnet: cd /tmp && wget https://github.com/Ahmed-Mohammed-Abbas/FootScores/archive/refs/heads/main.zip && unzip main.zip && cp -r FootScores-main/* /usr/lib/enigma2/python/Plugins/Extensions/ 
-
+telnet: cd /usr/lib/enigma2/python/Plugins/Extensions && rm -rf FootScores && wget --no-check-certificate https://github.com/Ahmed-Mohammed-Abbas/FootScores/archive/main.zip -O FootScores.zip && unzip FootScores.zip && mv FootScores-main FootScores && rm FootScores.zip && killall -9 enigma2
 
 New Version (1.1)
 Enhancements include:
